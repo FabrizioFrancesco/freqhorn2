@@ -1,11 +1,10 @@
 #ifndef RNDLEARNERV3__HPP__
 #define RNDLEARNERV3__HPP__
 
+#include <deque>
 #include "RndLearnerV2.hpp"
 
-#ifdef HAVE_ARMADILLO
 #include "DataLearner.hpp"
-#endif
 
 using namespace std;
 using namespace boost;
@@ -598,16 +597,13 @@ namespace ufo
     {
       if (printLog) outs () << "\nSAMPLING\n========\n";
 
-      map<int, int> defSz;
       ExprSet cands;
-      bool rndStarted = false;
+      int lsz = ruleManager.loopheads.size();
       for (int i = 0; i < maxAttempts; i++)
       {
         // next cand (to be sampled)
         // TODO: find a smarter way to calculate; make parametrizable
-        int cycleNum = i % ruleManager.cycles.size();
-        int tmp = ruleManager.cycles[cycleNum][0];
-        Expr rel = ruleManager.chcs[tmp].srcRelation;
+        Expr rel = ruleManager.loopheads[i % lsz];
         int invNum = getVarIndex(rel, decls);
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
@@ -801,6 +797,8 @@ namespace ufo
           analyzedExtras = true;
         }
         for (auto &cand : sm.candidates) candsFromCode.insert(cand);
+        for (auto &a : sm.intConsts) progConsts.insert(a);
+        for (auto &a : sm.intCoefs) intCoefs.insert(a);
 
         // for arrays
         if (ruleManager.hasArrays[invRel])
@@ -814,7 +812,6 @@ namespace ufo
 
       if (hasArrays)
       {
-
         for (int qNum = 0; qNum < qvits[invNum].size(); qNum++)
         {
           auto & q = qvits[invNum][qNum];
@@ -960,7 +957,6 @@ namespace ufo
 
     void getDataCandidates(map<Expr, ExprSet>& cands, Expr srcRel = NULL,
                            Expr phaseGuard = NULL, Expr invs = NULL, bool fwd = true){
-#ifdef HAVE_ARMADILLO
       if (printLog && phaseGuard == NULL) outs () << "\nDATA LEARNING\n=============\n";
       if (phaseGuard == NULL) assert(invs == NULL && srcRel == NULL);
       DataLearner dl(ruleManager, m_z3, to, printLog);
@@ -1044,9 +1040,6 @@ namespace ufo
           for (auto & c : tmp)
             addDataCand(invNum, c, cands[p.first]);
         }
-#else
-      if (printLog) outs() << "Skipping learning from data as required library (armadillo) not found\n";
-#endif
     }
 
     void mutateHeuristicEq(ExprSet& src, ExprSet& dst, Expr dcl, bool toProp)
@@ -1372,9 +1365,9 @@ namespace ufo
       return true;
     }
 
-    virtual void initializeAux(ExprSet& cands, BndExpl& bnd, int cycleNum, Expr pref)
+    virtual void initializeAux(ExprSet& cands, BndExpl& bnd, Expr dcl, int cycleNum, Expr pref)
     {
-      vector<int>& cycle = ruleManager.cycles[cycleNum];
+      vector<int>& cycle = ruleManager.cycles[dcl][cycleNum];
       HornRuleExt* hr = &ruleManager.chcs[cycle[0]];
       Expr rel = hr->srcRelation;
       ExprVector& srcVars = hr->srcVars;
@@ -1457,22 +1450,26 @@ namespace ufo
     RndLearnerV3 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat, debug);
 
     map<Expr, ExprSet> cands;
-    for (int i = 0; i < ruleManager.cycles.size(); i++)
+    for (auto& cyc : ruleManager.cycles)
     {
-      Expr dcl = ruleManager.chcs[ruleManager.cycles[i][0]].srcRelation;
-      if (ds.initializedDecl(dcl)) continue;
-      ds.initializeDecl(dcl);
-      if (!dSee) continue;
+      Expr rel = cyc.first;
+      for (int i = 0; i < cyc.second.size(); i++)
+      {
+        assert(rel == ruleManager.chcs[cyc.second[i][0]].srcRelation);
+        if (ds.initializedDecl(rel)) continue;
+        ds.initializeDecl(rel);
+        if (!dSee) continue;
 
-      Expr pref = bnd.compactPrefix(i);
-      ExprSet tmp;
-      getConj(pref, tmp);
-      for (auto & t : tmp)
-        if (hasOnlyVars(t, ruleManager.invVars[dcl]))
-          cands[dcl].insert(t);
+        Expr pref = bnd.compactPrefix(rel, i);
+        ExprSet tmp;
+        getConj(pref, tmp);
+        for (auto & t : tmp)
+          if (hasOnlyVars(t, ruleManager.invVars[rel]))
+            cands[rel].insert(t);
 
-      if (mut > 0) ds.mutateHeuristicEq(cands[dcl], cands[dcl], dcl, true);
-      ds.initializeAux(cands[dcl], bnd, i, pref);
+        if (mut > 0) ds.mutateHeuristicEq(cands[rel], cands[rel], rel, true);
+        ds.initializeAux(cands[rel], bnd, rel, i, pref);
+      }
     }
     if (dat > 0) ds.getDataCandidates(cands);
 
