@@ -2315,6 +2315,20 @@ namespace expr
       {
         return mkTerm (mpz_class (a), efac);
       }
+    
+    
+    // Added this to represent doubles
+      Expr mkMPQ(double a, ExprFactory& efac)
+      {
+            double precision = 10000.0;
+
+            mpz_class num(std::lround(a * precision));
+            mpz_class den(static_cast<long>(precision));
+            mpq_class ratio(num, den);
+            ratio.canonicalize();
+            
+            return mkTerm(ratio, efac);
+      }
 
       struct FAPP_PS
       {

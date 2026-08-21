@@ -757,14 +757,14 @@ namespace ufo
       return disjoin(newDsjs, fla->getFactory());
     }
 
-    ExprSet hardVars;
-    filter (fla, bind::IsConst (), inserter(hardVars, hardVars.begin()));
-    minusSets(hardVars, qVars);
-    ExprSet cnjs;
-    getConj(fla, cnjs);
-    constantPropagation(hardVars, cnjs, doArithm);
-    Expr tmp = simpEquivClasses(hardVars, cnjs, fla->getFactory());
-    tmp = simpleQE(tmp, qVars);
+      //ExprSet hardVars;
+          //filter (fla, bind::IsConst (), inserter(hardVars, hardVars.begin()));
+         // minusSets(hardVars, qVars);
+         // ExprSet cnjs;
+         // getConj(fla, cnjs);
+         // constantPropagation(hardVars, cnjs, doArithm);
+         // Expr tmp = simpEquivClasses(hardVars, cnjs, fla->getFactory());
+    Expr tmp = simpleQE(fla, qVars);
     if (doCore)
       return coreQE(tmp, qVars);
     else

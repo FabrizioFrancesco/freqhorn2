@@ -351,9 +351,9 @@ namespace ufo
         {
           hr.body = eliminateQuantifiers(conjoin(hr.lin, m_efac), hr.locVars,
                                                  !hasBV && doArithm, false);
-          hr.body = u.removeITE(hr.body);
-          hr.body = simplifyArr(hr.body);
-          hr.shrinkLocVars();
+         // hr.body = u.removeITE(hr.body);
+         // hr.body = simplifyArr(hr.body);
+         // hr.shrinkLocVars();
         }
         else
           hr.body = conjoin(hr.lin, m_efac);
