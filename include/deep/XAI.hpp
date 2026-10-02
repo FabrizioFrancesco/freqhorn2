@@ -1117,6 +1117,7 @@ namespace ufo
         }
 
         /* addToCandidates(ind, backup_candidate, 2); */
+        exit(0);
         return;
       }
 
