@@ -1060,6 +1060,7 @@ namespace ufo
         map<Expr, ExprSet> T;
         find_T(T);
         ENode* D = eptr(classification);
+        return; // DEBUG MODE
         classification = substitute_T(c,D,T,layer-1,W,b);
     }
 
