@@ -15,6 +15,7 @@ namespace ufo
   int number_of_layers;
   bool QE2 = false;
   Expr my_if_condition;
+  bool SKIP_CHECKS = true;
 
 
   class Xai : public RndLearnerV4
@@ -57,6 +58,33 @@ namespace ufo
       }
     }
 
+    // SKIP WEIGHTS AND BIASES (should be directly added as lemmas)
+    bool isFrozenConstSelect(Expr rel, Expr e)
+    {
+      if (!isOpX<EQ>(e)) return false;
+      Expr sel = e->left(), val = e->right();
+      if (isNumericConst(sel)) std::swap(sel, val);
+      if (!isOpX<SELECT>(sel) || !isNumericConst(val)) return false;
+
+      Expr arr = sel;
+      while (isOpX<SELECT>(arr))
+      {
+        if (!isNumericConst(arr->right())) return false;
+        arr = arr->left();
+      }
+      int i = getVarIndex(arr, ruleManager.invVars[rel]);
+      if (i < 0) return false;
+
+      for (auto & hr : ruleManager.chcs)
+      {
+        if (!hr.isInductive || hr.dstRelation != rel) continue;
+        ExprSet cnjs;
+        getConj(hr.body, cnjs);
+        Expr s = hr.srcVars[i], d = hr.dstVars[i];
+        if (!cnjs.count(mk<EQ>(d, s)) && !cnjs.count(mk<EQ>(s, d))) return false;
+      }
+      return true;
+    }
    
     Expr prime(Expr e, ExprFactory &efac) {
       ExprSet vars;
@@ -233,17 +261,26 @@ namespace ufo
       }
     }
 
+    // body of the transition before splitTransByLayer rewrote it into a
+    // disjunction over layers (later rounds still need the flat conjunction)
+    Expr origTransBody;
+    Expr transBody()
+    {
+      return origTransBody ? origTransBody : ruleManager.chcs[1].body;
+    }
+
     void find_T(map<Expr, ExprSet>& T)
     {
-      for (int i=0; i<ruleManager.chcs[1].body->arity(); ++i)
+      Expr body = transBody();
+      for (int i=0; i<body->arity(); ++i)
       {
-        Expr left_hs = (Expr) ruleManager.chcs[1].body->arg(i)->left();
-        Expr right_hs = (Expr) ruleManager.chcs[1].body->arg(i)->right();
-        if (isOpX<ITE>(ruleManager.chcs[1].body->arg(i)->right()))
+        Expr left_hs = (Expr) body->arg(i)->left();
+        Expr right_hs = (Expr) body->arg(i)->right();
+        if (isOpX<ITE>(body->arg(i)->right()))
         {
             T[left_hs].insert(right_hs);
         }
-        if (isOpX<ITE>(ruleManager.chcs[1].body->arg(i)->left()))
+        if (isOpX<ITE>(body->arg(i)->left()))
         {
             T[right_hs].insert(left_hs);
         }
@@ -587,247 +624,141 @@ namespace ufo
 
     }
 
-    tribool custom_bolean_evaluation_wp(Expr& qq)
+    bool num_val(Expr e, mpq_class& v)
     {
-      if (qq->arity()>2)
+      if (isOpX<MPQ>(e)) { v = getTerm<mpq_class>(e); return true; }
+      if (isOpX<MPZ>(e)) { v = mpq_class(getTerm<mpz_class>(e)); return true; }
+      return false;
+    }
+
+    Expr mk_num(const mpq_class& v)
+    {
+      mpq_class r(v);
+      r.canonicalize();
+      return mkTerm(r, m_efac);
+    }
+
+    // exact (mpq) constant folding; memo keeps shared subterms shared, so the
+    // back-propagated property grows linearly (not exponentially) with layers
+    Expr simplify_wp(Expr e, ExprMap& memo)
+    {
+      auto it = memo.find(e);
+      if (it != memo.end()) return it->second;
+
+      Expr res = e;
+      mpq_class v, w;
+      if (e->arity() == 0 || isOpX<FAPP>(e) || isOpX<SELECT>(e))
+        res = e;
+      else if (isOpX<ITE>(e))
       {
-          outs() << "custom_bolean_evaluation: Bad ITE condition" << endl;
-          exit(0);
+        Expr c = simplify_wp(e->arg(0), memo);
+        if (isOpX<TRUE>(c)) res = simplify_wp(e->arg(1), memo);
+        else if (isOpX<FALSE>(c)) res = simplify_wp(e->arg(2), memo);
+        else
+        {
+          Expr t = simplify_wp(e->arg(1), memo);
+          Expr f = simplify_wp(e->arg(2), memo);
+          res = (t == f) ? t : mk<ITE>(c, t, f);
+        }
+      }
+      else if (isOpX<PLUS>(e))
+      {
+        mpq_class sum = 0;
+        ExprVector terms;
+        for (auto a = e->args_begin(); a != e->args_end(); ++a)
+        {
+          Expr s = simplify_wp(*a, memo);
+          if (num_val(s, v)) sum += v;
+          else terms.push_back(s);
+        }
+        if (sum != 0 || terms.empty()) terms.insert(terms.begin(), mk_num(sum));
+        res = (terms.size() == 1) ? terms[0] : mknary<PLUS>(terms);
+      }
+      else if (isOpX<MULT>(e))
+      {
+        mpq_class prod = 1;
+        ExprVector terms;
+        for (auto a = e->args_begin(); a != e->args_end(); ++a)
+        {
+          Expr s = simplify_wp(*a, memo);
+          if (num_val(s, v)) prod *= v;
+          else terms.push_back(s);
+        }
+        if (prod == 0) res = mk_num(0);
+        else
+        {
+          if (prod != 1 || terms.empty()) terms.insert(terms.begin(), mk_num(prod));
+          res = (terms.size() == 1) ? terms[0] : mknary<MULT>(terms);
+        }
+      }
+      else if (isOpX<UN_MINUS>(e))
+      {
+        Expr s = simplify_wp(e->left(), memo);
+        res = num_val(s, v) ? mk_num(-v) : mk<UN_MINUS>(s);
+      }
+      else if (isOpX<AND>(e) || isOpX<OR>(e))
+      {
+        bool isAnd = isOpX<AND>(e);
+        ExprSet args;
+        for (auto a = e->args_begin(); a != e->args_end(); ++a)
+        {
+          Expr s = simplify_wp(*a, memo);
+          if (isOpX<TRUE>(s) || isOpX<FALSE>(s))
+          {
+            if (isOpX<TRUE>(s) == isAnd) continue;   // neutral element
+            args.clear();                             // absorbing element
+            args.insert(s);
+            break;
+          }
+          args.insert(s);
+        }
+        res = isAnd ? conjoin(args, m_efac) : disjoin(args, m_efac);
+      }
+      else if (isOpX<NEG>(e))
+      {
+        Expr s = simplify_wp(e->left(), memo);
+        if (isOpX<TRUE>(s)) res = mk<FALSE>(m_efac);
+        else if (isOpX<FALSE>(s)) res = mk<TRUE>(m_efac);
+        else if (isOpX<NEG>(s)) res = s->left();
+        else res = mk<NEG>(s);
+      }
+      else
+      {
+        ExprVector args;
+        for (auto a = e->args_begin(); a != e->args_end(); ++a)
+          args.push_back(simplify_wp(*a, memo));
+
+        if (args.size() == 2 && num_val(args[0], v) && num_val(args[1], w) &&
+            (isOpX<EQ>(e) || isOpX<NEQ>(e) || isOpX<GEQ>(e) ||
+             isOpX<LEQ>(e) || isOpX<GT>(e) || isOpX<LT>(e)))
+        {
+          bool b = isOpX<EQ>(e) ? v == w : isOpX<NEQ>(e) ? v != w :
+                   isOpX<GEQ>(e) ? v >= w : isOpX<LEQ>(e) ? v <= w :
+                   isOpX<GT>(e) ? v > w : v < w;
+          res = b ? mk<TRUE>(m_efac) : mk<FALSE>(m_efac);
+        }
+        else if (isOpX<MINUS>(e) && num_val(args[0], v))
+        {
+          bool allNum = true;
+          for (int i = 1; i < args.size() && allNum; i++)
+          {
+            if (num_val(args[i], w)) v -= w;
+            else allNum = false;
+          }
+          res = allNum ? mk_num(v) : m_efac.mkNary(e->op(), args.begin(), args.end());
+        }
+        else
+          res = m_efac.mkNary(e->op(), args.begin(), args.end());
       }
 
-
-      Expr a(qq->left());
-      Expr b(qq->right());
-      custom_real_simplification_wp(a);
-      custom_real_simplification_wp(b);
-
-      if (a->arity()>1 || b->arity()>1)
-        return indeterminate;
-
-  
-      mpq_class left_hs = mpq_from_MPQ(a); 
-      mpq_class right_hs = mpq_from_MPQ(b); 
-
-      if (isOpX<EQ>(qq))
-          return (left_hs==right_hs);
-      
-      if (isOpX<GEQ>(qq))
-          return (left_hs>=right_hs);
-
-      if (isOpX<LEQ>(qq))
-          return (left_hs<=right_hs);
-
-      if (isOpX<GT>(qq))
-          return (left_hs>right_hs);
-
-      if (isOpX<LT>(qq))
-          return (left_hs<right_hs);
-      
-        
-       
+      memo[e] = res;
+      return res;
     }
 
     void custom_real_simplification_wp(Expr& qq)
     {
-        if (isOpX<EQ>(qq))
-        {
-          Expr a(qq->left());
-          Expr b(qq->right());
-          custom_real_simplification_wp(a);
-          custom_real_simplification_wp(b);
-          qq = mk<EQ>(a,b);
-        }
-
-        if (isOpX<ITE>(qq))
-        {
-          Expr c(qq->arg(0));
-          tribool condition = custom_bolean_evaluation_wp(c);
-
-          if (condition==true)
-          {
-            Expr d(qq->arg(1));
-            custom_real_simplification_wp(d);
-            qq = d;
-          
-          }
-          if (condition==false)
-          {
-            Expr e(qq->arg(2));
-            custom_real_simplification_wp(e);
-            qq = e;
-          }
-        }
-
-        if (isOpX<PLUS>(qq))
-        {
-          double operand = 0;
-          std::vector<Expr> operand2;
-          bool contains_var = false;
-          for (int i=0; i<qq->arity(); ++i)
-          {
-            Expr a(qq->arg(i));
-            custom_real_simplification_wp(a);
-            
-            if (isNumericConst(a))
-             operand += double_from_MPQ(a); 
-            else
-            {
-             contains_var=true;
-             operand2.insert(operand2.begin(),a);
-            }
-          }
-          
-          qq = mkMPQ(operand,m_efac);
-          if (contains_var)
-          {
-            if (operand!=0)
-            {
-            for (int j=0; j<operand2.size(); ++j)
-              qq = mk<PLUS>(qq,operand2.at(j));
-            }
-            else
-            {
-              qq = operand2.at(0);
-              for (int j=1; j<operand2.size(); ++j)
-                qq = mk<PLUS>(qq,operand2.at(j));
-            }
-          }
-        }
-
-        if (isOpX<MINUS>(qq))
-        {
-          double operand = 0;
-          std::vector<Expr> operand2;
-          bool contains_var = false;
-          for (int i=0; i<qq->arity(); ++i)
-          {
-            Expr a(qq->arg(i));
-            custom_real_simplification_wp(a);
-            
-            if (isNumericConst(a))
-             operand -= double_from_MPQ(a);
-            else
-            {
-             contains_var=true;
-             operand2.insert(operand2.begin(),a);
-            }
-          }
-          
-          qq = mkMPQ(operand,m_efac);
-          if (contains_var)
-          {
-            if (operand!=0)
-            {
-            for (int j=0; j<operand2.size(); ++j)
-              qq = mk<MINUS>(qq,operand2.at(j));
-            }
-            else
-            {
-              qq = operand2.at(0);
-              for (int j=1; j<operand2.size(); ++j)
-                qq = mk<MINUS>(qq,operand2.at(j));
-            }
-          }
-        }
-
-        if (isOpX<MULT>(qq))
-        {
-          double operand = 1;
-          bool contains_var = false;
-          bool contains_null = false;
-          for (int i=0; i<qq->arity(); ++i)
-          {
-            Expr a(qq->arg(i));
-            custom_real_simplification_wp(a);
-            if (isNumericConst(a))
-            {
-             operand *= double_from_MPQ(a); 
-             if (double_from_MPQ(a)==0)
-              contains_null = true;
-            }
-            else contains_var = true;
-          }
-          if (!contains_var)
-            qq = mkMPQ(operand,m_efac);
-          if (contains_null)
-            qq = mkMPQ(0,m_efac);
-        }
-
-        if (isOpX<GEQ>(qq))
-        {
-          Expr a(qq->arg(0));
-          custom_real_simplification_wp(a);
-          Expr b(qq->arg(1));
-          custom_real_simplification_wp(b);
-
-          qq = mk<GEQ>(a,b);
-        }
-
-        if (isOpX<LEQ>(qq))
-        {
-          Expr a(qq->arg(0));
-          custom_real_simplification_wp(a);
-          Expr b(qq->arg(1));
-          custom_real_simplification_wp(b);
-
-          qq = mk<LEQ>(a,b);
-        }
-
-        if (isOpX<GT>(qq))
-        {
-          Expr a(qq->arg(0));
-          custom_real_simplification_wp(a);
-          Expr b(qq->arg(1));
-          custom_real_simplification_wp(b);
-
-          qq = mk<GT>(a,b);
-        }
-
-        if (isOpX<LT>(qq))
-        {
-          Expr a(qq->arg(0));
-          custom_real_simplification_wp(a);
-          Expr b(qq->arg(1));
-          custom_real_simplification_wp(b);
-
-          qq = mk<LT>(a,b);
-        }
-
-        if (isOpX<AND>(qq))
-        {
-          Expr a(qq->arg(0));
-          custom_real_simplification_wp(a);
-          Expr b(qq->arg(1));
-          custom_real_simplification_wp(b);
-
-          if (a!=b)
-            qq = mk<AND>(a,b);
-          else
-            qq = a;
-        }
-
-        if (isOpX<OR>(qq))
-        {
-          Expr a(qq->arg(0));
-          custom_real_simplification_wp(a);
-          Expr b(qq->arg(1));
-          custom_real_simplification_wp(b);
-
-          if (a!=b)
-            qq = mk<OR>(a,b);
-          else
-            qq = a;
-        }
-
-        if (isOpX<NEG>(qq))
-        {
-          Expr a(qq->arg(0));
-          custom_real_simplification_wp(a);
-
-          qq = mk<NEG>(a);
-        }
-
-
+      ExprMap memo;
+      qq = simplify_wp(qq, memo);
     }
 
     void propagate_forward_a_point(HornRuleExt& c, WbIndex& Wb, map<Expr, ExprSet>& X, int layer, int max_neurons_per_layer, Expr basic_cnd)
@@ -837,10 +768,11 @@ namespace ufo
       index_X(X, X_index);
 
       map<Expr, ExprSet> Z;
-      for (int i=0; i<ruleManager.chcs[1].body->arity(); ++i)
-        if (isOpX<ITE>(ruleManager.chcs[1].body->arg(i)->right()) || isOpX<ITE>(ruleManager.chcs[1].body->arg(i)->left()))
+      Expr body = transBody();
+      for (int i=0; i<body->arity(); ++i)
+        if (isOpX<ITE>(body->arg(i)->right()) || isOpX<ITE>(body->arg(i)->left()))
         {
-          Expr qq = substitute_X(ruleManager.chcs[1].body->arg(i),X_index);
+          Expr qq = substitute_X(body->arg(i),X_index);
           ENode* qq2 = eptr(qq);
           qq = substitute_Wb_fast(qq2,Wb);
           qq2 = eptr(qq);
@@ -957,11 +889,26 @@ namespace ufo
       ExprSet fct;
       Expr fact = replaceAll(c.body, c.dstVars, ruleManager.invVars[c.dstRelation]);
       getConj(fact, fct);
-      for (auto f : fct)
+     
+      if (!SKIP_CHECKS)
       {
-        if (isOpX<EQ>(f))
+        for (auto f : fct)
         {
-          addToCandidates(ind, f, 48);
+          if (isOpX<EQ>(f))
+          {
+            addToCandidates(ind, f, 48);
+          }
+        } 
+      } 
+      else 
+      {
+        for (auto f : fct)
+        {
+          if (!isOpX<EQ>(f)) continue;
+          if (isFrozenConstSelect(c.dstRelation, f))
+            addLemma(ind, sfs[ind].back(), f); 
+          else
+            addToCandidates(ind, f, 48);
         }
       }
 
@@ -997,12 +944,16 @@ namespace ufo
         {
           Expr basic_cnd = mk<NEG>(mk<EQ>(y[0],mkMPZ(i,m_efac)));
           Expr new_cnd = mk<OR>(basic_cnd,classification);
-          addToCandidates(ind, new_cnd, 1);
-          
+         
+          if (!SKIP_CHECKS)
+            addToCandidates(ind, new_cnd, 1);
+          else 
+           addLemma(ind, sfs[ind].back(), new_cnd); 
         
+          if (i==0 && SKIP_CHECKS)
+            exit(0);
 
-
-            back_propagate_property_once(c,classification,i,Wb);
+          back_propagate_property_once(c,classification,i,Wb);
         }
 
       
@@ -1013,11 +964,8 @@ namespace ufo
       if (QE3)
       {
           map<Expr, ExprSet> W, b;
-          find_weights_and_biases(c, W, b); //
+          find_weights_and_biases(c, W, b); 
          
-          
-  
-      
          
          Expr my_expression = (Expr) ruleManager.chcs[2].body->arg(1)->right(); 
          cpp_int number_layers2 = boost::lexical_cast<cpp_int>(ruleManager.chcs[2].body->arg(1)->right());
@@ -1915,11 +1863,48 @@ namespace ufo
 
     }
 
+   
+    bool transSplit = false;
+    void splitTransByLayer(HornRuleExt& c)
+    {
+      if (transSplit) return;
+      int indSrc = getVarIndex(c.srcRelation, decls);
+      Expr cnt = c.srcVars[0];
+
+   
+      map<Expr, ExprMap> perLayer;
+      for (auto & lm : sfs[indSrc].back().learnedExprs)
+      {
+        if (!isOpX<EQ>(lm)) continue;
+        Expr sel = lm->left(), val = lm->right();
+        if (isNumericConst(sel)) std::swap(sel, val);
+        if (!isOpX<SELECT>(sel) || !isNumericConst(val)) continue;
+        Expr lv = sel->right();                      
+        if (!isNumericConst(lv)) continue;
+        perLayer[lv][mk<SELECT>(sel->left(), cnt)] = val;
+      }
+      if (perLayer.empty()) return;                   
+
+      ExprVector cases;
+      for (auto & a : perLayer)
+      {
+        Expr bl = replaceAll(c.body, a.second);       
+        ExprMap cntRepl;
+        cntRepl[cnt] = a.first;
+        bl = replaceAll(bl, cntRepl);                
+        bl = simplifyBool(simplifyArithm(bl));
+        cases.push_back(mk<AND>(mk<EQ>(cnt, a.first), bl));
+      }
+      origTransBody = c.body;
+      c.body = disjoin(cases, m_efac);
+      transSplit = true;
+    }
+
     tribool invSyn(int b = 0)
     {
 
      
-      if (b == 200 /* Change this and report runtimes */) return indeterminate;
+      if (b == 2 /* 200 */ /* Change this and report runtimes */) return indeterminate;
       outs () << "\nINV SYN ROUND " << b << "\n";
       outs().flush();
       candidates.clear();
@@ -1943,6 +1928,9 @@ namespace ufo
         if (c.isInductive) processTrans(c);
         if (!c.isFact && ! c.isInductive) processQuery(c); 
       }
+
+      for (auto & c : ruleManager.chcs)
+        if (c.isInductive) splitTransByLayer(c);
 
       auto res = multiHoudini(ruleManager.wtoCHCs);
       if (res) assignPrioritiesForLearned();
