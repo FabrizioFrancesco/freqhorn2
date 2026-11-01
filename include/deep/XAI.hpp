@@ -1,8 +1,11 @@
-#ifndef XAI__HPP__
-#define XAI__HPP__
+#ifndef XAI2__HPP__
+#define XAI2__HPP__
 
 #include "RndLearnerV4.hpp"
 #include <cmath>
+
+// use EGG?
+// possibility
 
 using namespace std;
 using namespace boost;
@@ -12,6 +15,7 @@ namespace ufo
   int number_of_layers;
   bool QE2 = false;
   Expr my_if_condition;
+
 
   class Xai : public RndLearnerV4
   {
@@ -53,14 +57,13 @@ namespace ufo
       }
     }
 
+   
     Expr prime(Expr e, ExprFactory &efac) {
       ExprSet vars;
-      
       filter(e, bind::IsConst(), inserter(vars, vars.begin()));
 
       ExprMap renameMap;
       for (auto v : vars) {
-       
         std::ostringstream os;
         os << *v;
         std::string oldName = os.str();
@@ -81,7 +84,6 @@ namespace ufo
         os << *v;
         std::string oldName = os.str();
         string name = oldName;
-
         if (name.size() > 2 && name.substr(name.size() - 2) == "_p") {
             string oldName = name.substr(0, name.size() - 2);
             restoreMap[v] = bind::intConst(mkTerm<string>(oldName, efac));
@@ -157,7 +159,17 @@ namespace ufo
         } else {
           val = lm->left();
           var = lm->right();
-         
+          /*
+          auto it1 = X.find(lm->right());
+          auto it2 = X.find(lm->left());
+
+          if (X.end()==it1 || X.end()==it2)
+          {
+            while(true)
+              outs() << lm << endl;
+          }
+          else outs() << "OK!" << endl;
+          */
 
         }
 
@@ -169,7 +181,6 @@ namespace ufo
         }
       }
 
-      // compensate for automatic replacement of values
       for (auto const& [key, values] : X) {
         if (!isNumericConst(*values.begin())) {
             X[key] = X[*values.begin()];
@@ -181,7 +192,7 @@ namespace ufo
 
     void find_weights_and_biases(HornRuleExt& c, map<Expr, ExprSet>& W, map<Expr, ExprSet>& b)
     {
-     
+    
       if (c.body == NULL) return;
 
       ExprSet bodyConjuncts;
@@ -253,222 +264,95 @@ namespace ufo
         }
     }
 
-    void remap_X_Y(ENode* A, map<Expr, ExprSet>& X, map<Expr,ExprSet>& Y)
+    void index_X(map<Expr, ExprSet>& X, unordered_map<string, Expr>& key_to_val)
     {
-        if (A->arity()==0)
-        {
-          Expr the_A(A);
-           for (auto const& [key, values] : X) {
+        for (auto const& [key, values] : X)
+            key_to_val.emplace(lexical_cast<string>(custom_unprime(key, m_efac)), *values.begin());
+    }
 
-            string the_A_name1 = lexical_cast<std::string>(the_A);
-            string the_key_name2 = lexical_cast<std::string>(custom_unprime(key,m_efac));
-           
-            if (the_A_name1 == the_key_name2)
-            {
-              if (Y.find(the_A) == Y.end()) {
-                Y[the_A].insert(*values.begin());
-              }
-      
-            }
-          }
+    Expr substitute_X(ENode* A, unordered_map<string, Expr>& key_to_val)
+    {
+        Expr old_var_expr(A);
+        if (key_to_val.empty()) return old_var_expr;
+
+        ExprSet leaves;
+        filter(old_var_expr, [](Expr e) { return e->arity() == 0; },
+          inserter(leaves, leaves.begin()));
+
+        ExprMap repl_map;
+        for (auto const& l : leaves) {
+            auto it = key_to_val.find(lexical_cast<string>(l));
+            if (it != key_to_val.end()) repl_map[l] = it->second;
         }
-        else
-        {
-          for (int i=0; i<A->arity(); ++i)
-            remap_X_Y(A->arg(i), X, Y);
-        }
+
+        return replaceAll(old_var_expr, repl_map);
     }
 
     Expr substitute_X(ENode* A, map<Expr, ExprSet>& X)
     {
-
-        map<Expr, ExprSet> Y;
-        remap_X_Y(A,X,Y);
-
-        Expr old_var_expr(A);
-        ExprMap repl_map;
-        for (auto const& [key, values]: Y) {
-            Expr new_val_expr = *values.begin();
-            repl_map[key] = new_val_expr;
-        }
-        Expr new_tree = replaceAll(old_var_expr, repl_map);
-        old_var_expr = new_tree;
-
-        return old_var_expr;
-
-
-    
-        
+        unordered_map<string, Expr> key_to_val;
+        index_X(X, key_to_val);
+        return substitute_X(A, key_to_val);
     }
 
-    void remap_Wb_Wb2(ENode* A, map<Expr, ExprSet>& X, map<Expr,ExprSet>& Y, map<Expr,Expr>& Z)
+    struct WbIndex
     {
-        if (A->arity()==0)
-        {
-          Expr the_A(A);
+      unordered_map<string, Expr> key_to_val;
+      unordered_map<Expr, Expr> lookups;
+    };
 
-          if (Z.find(the_A)!=Z.end())
+    void index_Wb(map<Expr, ExprSet>& Wb, WbIndex& idx)
+    {
+        unordered_map<string, ExprSet> key_to_vals;
+        for (auto const& [key, values] : Wb)
+            key_to_vals[lexical_cast<string>(custom_unprime(key, m_efac))].insert(*values.begin());
+
+        for (auto const& [key, values] : key_to_vals)
+            idx.key_to_val.emplace(key, *values.begin());
+        idx.lookups.clear();
+    }
+
+    Expr lookup_Wb(Expr s, WbIndex& idx)
+    {
+        auto it = idx.lookups.find(s);
+        if (it != idx.lookups.end()) return it->second;
+
+        auto k = idx.key_to_val.find(lexical_cast<string>(s));
+        Expr val = (k == idx.key_to_val.end()) ? Expr() : k->second;
+        idx.lookups[s] = val;
+        return val;
+    }
+
+    void get_desired_variables_from_key(Expr e, ExprSet& desired_variables, unordered_set<ENode*>& visited)
+    {
+        if (!visited.insert(&*e).second) return;
+
+        if (isOpX<SELECT>(e))
+        {
+            desired_variables.insert(e);
             return;
-
-          for (auto const& [key, values] : X) {
-            
-
-            Expr E;
-            get_variable_from_key(eptr(key),E);
- 
-            string the_A_name1 = lexical_cast<std::string>(the_A);
-            string the_key_name2 = lexical_cast<std::string>(custom_unprime(E,m_efac));
-            if (the_A_name1 == the_key_name2)
-            {
-              Expr key2 = key;
-              ExprMap repl_map;
-              repl_map[E] = the_A;
-              Expr new_tree = replaceAll(key2, repl_map);
-
-              if (Y.find(new_tree) == Y.end()) {
-                Y[new_tree].insert(*values.begin());
-                Z[the_A] = the_A;
-              
-              }
-            }
-          }
         }
-        else
-        {
-          for (int i=0; i<A->arity(); ++i)
-            remap_Wb_Wb2(A->arg(i), X, Y, Z);
-        }
+
+        for (int i=0; i<e->arity(); ++i)
+          get_desired_variables_from_key(e->arg(i), desired_variables, visited);
     }
 
-    void my_custom_replacement(ENode* A, Expr& B, map<Expr, ExprSet>& Y)
+    Expr substitute_Wb_fast(ENode* A, WbIndex& idx)
     {
-      for (auto const& [key, values] : Y) {
-        Expr the_A(A);
-        string the_A_name1 = lexical_cast<std::string>(the_A);
-        string the_key_name2 = lexical_cast<std::string>(custom_unprime(key,m_efac));
-        if (the_A_name1 == the_key_name2)
-        {
-
-            ExprMap repl_map;
-            repl_map[A] = *values.begin();
-            ENode* C = eptr(B);
-            Expr new_tree = replaceAll(C, repl_map);
-
-
-            B = new_tree;
-          
-        }
-      }
-      
-      for (int i=0; i<A->arity(); ++i)
-      {
-          my_custom_replacement(A->arg(i),B,Y);
-      }
-    }
-
-    Expr substitute_Wb(ENode* A, map<Expr, ExprSet>& Wb)
-    {
-        map<Expr, ExprSet> Y;
-        map<Expr, Expr> Z;
-        remap_Wb_Wb2(A,Wb,Y,Z);
-
-        
-        
         Expr old_var_expr(A);
-        my_custom_replacement(A,old_var_expr,Y);
-        
-       
-        
+        if (idx.key_to_val.empty()) return old_var_expr;
 
-        return old_var_expr;
+        ExprSet desired_variables;
+        unordered_set<ENode*> visited;
+        get_desired_variables_from_key(old_var_expr, desired_variables, visited);
 
-        
-    }
-
-    void get_desired_variables_from_key(ENode* converted_key, std::vector<Expr>& desired_variables)
-    {
-        if (isOpX<NEG>(converted_key))
-          get_desired_variables_from_key(converted_key->arg(0), desired_variables);
-
-        if (isOpX<SELECT>(converted_key))
-        {
-            Expr E(converted_key);
-  
-            auto it = std::lower_bound(desired_variables.begin(), desired_variables.end(), E,
-              [](const Expr& a, const Expr& b) {
-                  return boost::lexical_cast<string>(a) < boost::lexical_cast<string>(b);
-            });
-            
-            if (std::find(desired_variables.begin(), desired_variables.end(), E) == desired_variables.end())
-              desired_variables.insert(it, E);
-        }
-        else
-        {
-          for (int i=0; i<converted_key->arity(); ++i)
-            get_desired_variables_from_key(converted_key->arg(i), desired_variables);
-        }
-    }
-
-    
-    void remap_Wb_Wb2_QE(HornRuleExt& c, ENode* A, map<Expr, ExprSet>& X, map<Expr,ExprSet>& Y)
-    {
-     
-      std::vector<Expr> desired_variables;
-      get_desired_variables_from_key(A,desired_variables);
-
-      
-      for (auto const& [key, values] : X) {
-          Expr X_var = key;
-          Expr Y_var;
-          for (int j=0; j<desired_variables.size(); ++j)
-          {
-            Y_var = desired_variables[j];
-            if (boost::lexical_cast<string>(custom_unprime(X_var,m_efac))==boost::lexical_cast<string>(Y_var))
-              Y[desired_variables[j]].insert(*values.begin());
-            
-          }
-      }
-
-  
-    
-    }
-
-    Expr substitute_Wb_QE(HornRuleExt& c, ENode* A, map<Expr, ExprSet>& Wb)
-    {
-        map<Expr, ExprSet> Y;
-        remap_Wb_Wb2_QE(c,A,Wb,Y);
-
-        
-        
-        Expr old_var_expr(A);
-      
-
-        
         ExprMap repl_map;
-        for (auto const& [key, values]: Y) {
-            Expr new_val_expr = (Expr) *values.begin();
-            repl_map[key] = new_val_expr;
+        for (auto const& d : desired_variables) {
+            Expr val = lookup_Wb(d, idx);
+            if (val != NULL) repl_map[d] = val;
         }
 
-        Expr new_tree = replaceAll(old_var_expr, repl_map);
-        old_var_expr = new_tree;
-        
-
-       
-      
-        
-      
-
-
-
-
-        
-       
-        
-
-        return old_var_expr;
-
-        
+        return replaceAll(old_var_expr, repl_map);
     }
         
 
@@ -487,6 +371,23 @@ namespace ufo
       double quot = ((double) num)/((double) den);
 
       return quot;
+    }
+
+    mpq_class mpq_from_MPQ(Expr& a)
+    {
+        string aa = boost::lexical_cast<string>(a);
+        int division_position = aa.find('/');
+
+        if (division_position == -1)
+          return boost::lexical_cast<double>(a);
+    
+
+
+        int num = stoi(aa.substr(0,division_position));
+        int den = stoi(aa.substr(division_position+1));
+        mpq_class ratio(num, den);
+        ratio.canonicalize();
+        return ratio;
     }
 
     bool custom_bolean_evaluation(Expr& qq)
@@ -508,8 +409,10 @@ namespace ufo
           outs() << "custom_bolean_evaluation: Could not simplify ITE condition, probably unsupported operation in custom_real_simplification" << endl;
           exit(0);
       }
-      double left_hs = double_from_MPQ(a);
-      double right_hs = double_from_MPQ(b);
+     
+
+      mpq_class left_hs = mpq_from_MPQ(a); 
+      mpq_class right_hs = mpq_from_MPQ(b); 
 
       if (isOpX<EQ>(qq))
           return (left_hs==right_hs);
@@ -591,7 +494,7 @@ namespace ufo
                 outs() << "custom_real_simplification: Could not simplify - operation, probably unsupported operation in custom_real_simplification" << endl;
                 exit(0);
             }
-            operand -= double_from_MPQ(a);
+            operand -= double_from_MPQ(a); 
           }
           qq = mkMPQ(operand,m_efac);
         }
@@ -608,7 +511,7 @@ namespace ufo
                 outs() << "custom_real_simplification: Could not simplify * operation, probably unsupported operation in custom_real_simplification" << endl;
                 exit(0);
             }
-            operand *= double_from_MPQ(a);
+            operand *= double_from_MPQ(a); 
           }
           qq = mkMPQ(operand,m_efac);
         }
@@ -701,8 +604,9 @@ namespace ufo
       if (a->arity()>1 || b->arity()>1)
         return indeterminate;
 
-      double left_hs = double_from_MPQ(a);
-      double right_hs = double_from_MPQ(b);
+  
+      mpq_class left_hs = mpq_from_MPQ(a); 
+      mpq_class right_hs = mpq_from_MPQ(b); 
 
       if (isOpX<EQ>(qq))
           return (left_hs==right_hs);
@@ -765,7 +669,7 @@ namespace ufo
             custom_real_simplification_wp(a);
             
             if (isNumericConst(a))
-             operand += double_from_MPQ(a);
+             operand += double_from_MPQ(a); 
             else
             {
              contains_var=true;
@@ -837,7 +741,7 @@ namespace ufo
             custom_real_simplification_wp(a);
             if (isNumericConst(a))
             {
-             operand *= double_from_MPQ(a);
+             operand *= double_from_MPQ(a); 
              if (double_from_MPQ(a)==0)
               contains_null = true;
             }
@@ -926,37 +830,27 @@ namespace ufo
 
     }
 
-    void propagate_forward_a_point(map<Expr, ExprSet>& W, map<Expr, ExprSet>& b, map<Expr, ExprSet>& X, int layer, int max_neurons_per_layer, Expr basic_cnd)
+    void propagate_forward_a_point(HornRuleExt& c, WbIndex& Wb, map<Expr, ExprSet>& X, int layer, int max_neurons_per_layer, Expr basic_cnd)
     {
      
+      unordered_map<string, Expr> X_index;
+      index_X(X, X_index);
 
       map<Expr, ExprSet> Z;
       for (int i=0; i<ruleManager.chcs[1].body->arity(); ++i)
         if (isOpX<ITE>(ruleManager.chcs[1].body->arg(i)->right()) || isOpX<ITE>(ruleManager.chcs[1].body->arg(i)->left()))
         {
-       
-
-          Expr qq = substitute_X(ruleManager.chcs[1].body->arg(i),X);
+          Expr qq = substitute_X(ruleManager.chcs[1].body->arg(i),X_index);
           ENode* qq2 = eptr(qq);
-          qq = substitute_Wb(qq2,W);
+          qq = substitute_Wb_fast(qq2,Wb);
           qq2 = eptr(qq);
-          qq = substitute_Wb(qq2,b);
-          qq2 = eptr(qq);
-
-      
-         
-           custom_real_simplification(qq);
-        
-
-
+          custom_real_simplification(qq);
           Z[qq->left()].insert(qq->right());
-          
-       
         }
+
        
         Z[((Expr) basic_cnd->arg(0))->left()].insert(mkMPQ(layer+1,m_efac));
         X = Z;
-    
     }
 
     int get_number_of_layers(HornRuleExt& c)
@@ -982,8 +876,6 @@ namespace ufo
             }
         }
       }
-
-      
       outs() << "Could not read number of layers from file" << endl;
       exit(0);
     }
@@ -1002,7 +894,6 @@ namespace ufo
         
         if (!is_there_counter)
         {
-          
           return mk<NEG>(my_expression);
         }
       }
@@ -1012,7 +903,7 @@ namespace ufo
 
  
 
-    Expr substitute_T(HornRuleExt& c, ENode* A, map<Expr, ExprSet>& T, int l, map<Expr, ExprSet>& W, map<Expr, ExprSet>& b)
+    Expr substitute_T(HornRuleExt& c, ENode* A, map<Expr, ExprSet>& T, int l, WbIndex& Wb)
     {
       Expr old_var_expr(A);
       ExprMap repl_map_prime;
@@ -1029,43 +920,39 @@ namespace ufo
         repl_map_prime[aa] = bb;
       }
     
+     
       Expr new_tree = replaceAll(old_var_expr, repl_map_prime);
       old_var_expr = new_tree;
 
+      ExprMap repl_map_FH_zero;
+      repl_map_FH_zero[ruleManager.invVars[c.dstRelation][0]] = mkMPQ(l,m_efac);
+
       ExprMap repl_map;
       for (auto const& [key, values]: T) {
-          Expr new_val_expr = *values.begin();
-          repl_map[key] = new_val_expr;
+          Expr new_val_expr = replaceAll(*values.begin(), repl_map_FH_zero);
+          repl_map[key] = substitute_Wb_fast(eptr(new_val_expr), Wb);
       }
       new_tree = replaceAll(old_var_expr, repl_map);
       old_var_expr = new_tree;
-    
-      ExprMap repl_map_FH_zero;
-      repl_map_FH_zero[ruleManager.invVars[c.dstRelation][0]] = mkMPQ(l,m_efac);
-      new_tree = replaceAll(old_var_expr, repl_map_FH_zero);
-      old_var_expr = new_tree;
-     
-      old_var_expr = substitute_Wb_QE(c,eptr(old_var_expr),W);
-      old_var_expr = substitute_Wb_QE(c,eptr(old_var_expr),b);
-
-
+       
       custom_real_simplification_wp(old_var_expr);
-     
+
    
       return old_var_expr;
     }
 
-    void back_propagate_property_once(HornRuleExt& c, Expr& classification, int layer, map<Expr, ExprSet>& W, map<Expr, ExprSet>& b)
+    void back_propagate_property_once(HornRuleExt& c, Expr& classification, int layer, WbIndex& Wb)
     {
         map<Expr, ExprSet> T;
         find_T(T);
         ENode* D = eptr(classification);
-        return; // DEBUG MODE
-        classification = substitute_T(c,D,T,layer-1,W,b);
+   
+        classification = substitute_T(c,D,T,layer-1,Wb);
     }
 
     void processFact(HornRuleExt& c)
     {
+
       int ind = getVarIndex(c.dstRelation, decls);
       ExprSet fct;
       Expr fact = replaceAll(c.body, c.dstVars, ruleManager.invVars[c.dstRelation]);
@@ -1083,7 +970,6 @@ namespace ufo
       
       bool QE = true;
       int which_heuristics = -7295;
-     // int num_iterations = 10;
       int num_iterations = 100;
       double h_radius = 10;
       int c_radius = 5;
@@ -1092,46 +978,115 @@ namespace ufo
 
       if (QE)
       {
+
          map<Expr, ExprSet> W, b;
         find_weights_and_biases(c, W, b);
-
+        WbIndex Wb; 
+        index_Wb(W, Wb);
+        index_Wb(b, Wb);
         auto y = ruleManager.invVars[c.dstRelation];
 
-        number_of_layers = get_number_of_layers(c); // get from file
+        number_of_layers = get_number_of_layers(c);
         Expr classification = get_classification_property(c);
-       /* Expr backup_candidate = mk<TRUE>(m_efac); */
-
+    
         Expr my_cnd = mk<GEQ>(y[0],mkMPZ(0,m_efac));
         addToCandidates(ind, my_cnd, 0);
         Expr my_cnd2 = mk<LEQ>(y[0],mkMPZ(number_of_layers,m_efac));
         addToCandidates(ind, my_cnd2, 100);
-
         for (int i=number_of_layers; i>=0; --i)
         {
           Expr basic_cnd = mk<NEG>(mk<EQ>(y[0],mkMPZ(i,m_efac)));
           Expr new_cnd = mk<OR>(basic_cnd,classification);
           addToCandidates(ind, new_cnd, 1);
-         
-         /* backup_candidate = mk<AND>(backup_candidate,new_cnd); */
-          if (i!=0)
-            back_propagate_property_once(c,classification,i,W,b);
+          
+        
+
+
+            back_propagate_property_once(c,classification,i,Wb);
         }
 
-        /* addToCandidates(ind, backup_candidate, 2); */
-        exit(0);
+      
         return;
       }
 
-      if (which_heuristics==-7295) // abductive explanations -> forward propagation of initial point
+      bool QE3 = false;
+      if (QE3)
+      {
+          map<Expr, ExprSet> W, b;
+          find_weights_and_biases(c, W, b); //
+         
+          
+  
+      
+         
+         Expr my_expression = (Expr) ruleManager.chcs[2].body->arg(1)->right(); 
+         cpp_int number_layers2 = boost::lexical_cast<cpp_int>(ruleManager.chcs[2].body->arg(1)->right());
+      
+
+          int number_layers=2; 
+          int which_class = 0;
+
+       
+
+
+
+          auto& invVars = ruleManager.invVars[c.dstRelation];
+          if (invVars.size() == 0) return;
+
+          
+              Expr basic_formula = mk<TRUE>(m_efac);
+              for (auto x : invVars) {
+                  if (x != invVars[which_class]) {
+                      basic_formula = mk<AND>(basic_formula, mk<GEQ>(invVars[which_class], x));
+
+                      
+                  }
+              }
+             
+              for (int current = number_layers; current >= 0; --current)
+              {
+                  ExprMap substMap;
+                  for (size_t j = 0; j < invVars.size(); ++j)
+                  {
+                      if (isOpX<ARRAY_TY>(invVars[j])) {
+                        Expr weighted_sum = mkMPZ(0, m_efac);
+                        for (auto const& [key, values] : W) {
+                            if (!values.empty()) {
+                                Expr weight = *values.begin();
+                                weighted_sum = mk<PLUS>(weighted_sum, mk<MULT>(weight, invVars[j]));
+                         
+                            }
+                        }
+                      
+                        substMap[prime(invVars[j],m_efac)] = weighted_sum;
+                    }
+                  }
+
+               
+                  basic_formula = prime(basic_formula,m_efac);
+                  basic_formula = replaceAll(basic_formula, substMap);
+                 
+                  if (!isOpX<TRUE>(basic_formula) && !isOpX<FALSE>(basic_formula)) {
+                      addToCandidates(ind, basic_formula, 56);
+                  }
+                 
+              }
+          
+      }
+
+      if (which_heuristics==-7295) 
       {
           map<Expr, ExprSet> X;
           find_initial_point(c, X);
           map<Expr, ExprSet> W, b;
           find_weights_and_biases(c, W, b);
+          WbIndex Wb; 
+          index_Wb(W, Wb);
+          index_Wb(b, Wb);
 
           int num_layers = 2;
           int max_neurons_per_layer = X.size()-1;
-         
+       
           auto y = ruleManager.invVars[c.dstRelation];
           Expr my_cnd = mk<GEQ>(y[0],mkMPZ(0,m_efac));
           addToCandidates(ind, my_cnd, 0);
@@ -1150,7 +1105,7 @@ namespace ufo
                 addToCandidates(ind, final_cnd,50);
             }
             if (i!=num_layers)
-              propagate_forward_a_point(W,b,X,i,max_neurons_per_layer,basic_cnd);
+              propagate_forward_a_point(c,Wb,X,i,max_neurons_per_layer,basic_cnd);
           }
 
           
@@ -1169,7 +1124,7 @@ namespace ufo
           
         auto x = ruleManager.invVars[c.dstRelation];
 
-        number_of_layers = 2;
+        number_of_layers = 2; 
         for (int i=0; i<=number_of_layers; ++i)
         {
           Expr basic_cnd = mk<NEG>(mk<EQ>(x[0],mkMPZ(i,m_efac)));
@@ -1180,15 +1135,13 @@ namespace ufo
                   double r1 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
                   double r2 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
            
-           
-                  
+              
                   cndx = mk<GEQ>(z,mkMPQ(0,m_efac));
                   cnd0 = mk<LEQ>(z,mkMPQ(2,m_efac));
                   cnd1 = mk<LEQ>(z,mkMPZ(3,m_efac));
                   cndy = mk<OR>(basic_cnd,cndx);
                   cnd3 = mk<OR>(basic_cnd,cnd0);
                   cnd5 = mk<OR>(basic_cnd,cnd1);
-                 
                
                   addToCandidates(ind, cndy, 56);
                   addToCandidates(ind, cnd3, 56);
@@ -1212,7 +1165,7 @@ namespace ufo
           
         auto x = ruleManager.invVars[c.dstRelation];
 
-        number_of_layers = 2;
+        number_of_layers = 2; 
         for (int i=0; i<=number_of_layers; ++i)
         {
           Expr basic_cnd = mk<NEG>(mk<EQ>(x[0],mkMPZ(i,m_efac)));
@@ -1223,7 +1176,7 @@ namespace ufo
                   double r1 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
                   double r2 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
            
-       
+             
                   cnd0 = mk<GEQ>(z,mkMPQ(0,m_efac));
                   cnd1 = mk<LEQ>(z,mkMPZ(2,m_efac));
                   cnd = mk<EQ>(z,mkMPQ(3,m_efac));
@@ -1233,15 +1186,13 @@ namespace ufo
                   cnd5 = mk<OR>(basic_cnd,cnd2);
                   cndy = mk<OR>(basic_cnd,cndx);
               
-                  addToCandidates(ind, cnd3, 56);
-                  addToCandidates(ind, cnd5, 56);
                   addToCandidates(ind, cndy, 56);
                   addToCandidates(ind, cnd0, 56);
                   addToCandidates(ind, cnd1, 56);
                 }
       }
     }
-   
+    
 
       if (which_heuristics==-7291)
       {
@@ -1254,7 +1205,7 @@ namespace ufo
           
         auto x = ruleManager.invVars[c.dstRelation];
 
-        number_of_layers = 2;
+        number_of_layers = 2; 
         for (int i=0; i<=number_of_layers; ++i)
         {
           Expr basic_cnd = mk<NEG>(mk<EQ>(x[0],mkMPZ(i,m_efac)));
@@ -1265,7 +1216,7 @@ namespace ufo
                   double r1 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
                   double r2 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
            
-            
+              
                   cnd = mk<LEQ>(z,mkMPQ(r1,m_efac));
                   cnd2 = mk<GEQ>(z,mkMPQ(r2,m_efac));
                   cndx = mk<EQ>(z,mkMPQ(0,m_efac));
@@ -1273,14 +1224,14 @@ namespace ufo
                   cnd5 = mk<OR>(basic_cnd,cnd2);
                   cndy =mk<OR>(basic_cnd,cndx);
 
-              
+                
                   addToCandidates(ind, cnd3, 56);
                   addToCandidates(ind, cnd5, 56);
                   addToCandidates(ind, cndy, 56);
                 }
 
             
-         
+        
             
               for (auto z: ruleManager.invVars[c.dstRelation])
               for (auto w: ruleManager.invVars[c.dstRelation])
@@ -1290,7 +1241,7 @@ namespace ufo
                   double c2 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
                   double c3 = (double) (2*h_radius*((double) rand()/RAND_MAX) - h_radius);
                   
-                  
+                 
                   cnd = mk<LEQ>(mk<PLUS>(mk<MULT>(z,mkMPQ(c1,m_efac)),mk<MULT>(z,mkMPQ(c2,m_efac))),mkMPQ(c3,m_efac));
                   cnd3 = mk<OR>(basic_cnd,cnd);
                   addToCandidates(ind, cnd3, 58);
@@ -1422,7 +1373,7 @@ namespace ufo
           Expr new_basic_cnd = mk<NEG>(mk<EQ>(x[0],mkMPZ(2,m_efac)));
           Expr new_basic_cnd1 = mk<NEG>(mk<EQ>(x[0],mkMPZ(1,m_efac)));
 
-          
+          //for (int i=0; i<num_iterations; ++i)
             for (auto z: ruleManager.invVars[c.dstRelation])
               if (!isOp<ARRAY_TY>(z->left()->arg(1)))
               {
@@ -1458,7 +1409,6 @@ namespace ufo
             
          
       }
-
 
       if (which_heuristics==-302)
       {
@@ -1537,8 +1487,6 @@ namespace ufo
 
           for (int i = 0; i < NUM_SIMULATIONS; ++i)
           {
-
-              // OUTER LAYER
               Expr basic_formula = mk<TRUE>(m_efac);
               for (auto x : invVars) {
                   if (x != invVars[which_class]) {
@@ -1571,13 +1519,12 @@ namespace ufo
                   basic_formula = unprime(basic_formula,m_efac);
                 
                   if (!isOpX<TRUE>(basic_formula) && !isOpX<FALSE>(basic_formula)) {
-                    
+                   
                       addToCandidates(ind, basic_formula, 10400 + current);
                   }
               }
           }
       }
-
 
       if (which_heuristics == -104)
       {
@@ -1594,16 +1541,17 @@ namespace ufo
                   varsToEliminate.erase(v);
               }
 
+
               for (auto const& [var_w, values_w] : W) {
                   for (auto val_w : values_w) {
                       for (auto const& [var_b, values_b] : b) {
                           for (auto val_b : values_b) {
                               
-                            
+                          
                               Expr term = mk<PLUS>(mk<MULT>(val_w, var_w), val_b);
                               Expr query = mk<GEQ>(term, mkMPZ(0, m_efac));
 
-                           
+                            
                               Expr qed = ufo::eliminateQuantifiers(query, varsToEliminate);
 
                               if (qed != NULL && !isOpX<TRUE>(qed) && !isOpX<FALSE>(qed)) {
@@ -1617,12 +1565,6 @@ namespace ufo
           }
       }
 
-
-      
- 
- 
-
- 
       if (which_heuristics==-102)
       {
         Expr cnd;
@@ -1677,9 +1619,9 @@ namespace ufo
           if (!isOp<ARRAY_TY>(x->left()->arg(1)) && counter>0)
           {
             cnd = mk<EQ>(x,mkMPZ(0,m_efac));
-        
-            addToCandidates(ind, cnd, 51);
      
+            addToCandidates(ind, cnd, 51);
+  
           }
           ++counter;
         }
@@ -1707,7 +1649,7 @@ namespace ufo
 
       if (which_heuristics==2)
       {
-       
+
        
         Expr cnd;
         Expr cnd2;
@@ -1727,7 +1669,7 @@ namespace ufo
 
       if (which_heuristics==3)
       {
-
+ 
        
         
         Expr cnd;
@@ -1768,7 +1710,7 @@ namespace ufo
           int counter = 0;
           Expr basic_cnd;
           for (auto x: ruleManager.invVars[c.dstRelation])
-              if (counter==0)
+              if (counter==0) 
               {
                   basic_cnd = mk<NEG>(mk<EQ>(x,mkMPZ(3,m_efac)));
                   counter += 1;
@@ -1797,7 +1739,7 @@ namespace ufo
           int counter = 0;
           Expr basic_cnd;
           for (auto x: ruleManager.invVars[c.dstRelation])
-              if (counter==0)
+              if (counter==0) 
               {
                   basic_cnd = mk<NEG>(mk<EQ>(x,mkMPZ(0,m_efac)));
                   counter += 1;
@@ -1853,10 +1795,9 @@ namespace ufo
             }
           }
 
-         
+     
           property_to_propagate = property_to_propagate->left()->left();
 
-         
           for (int i=number_of_layers-1; i>=0; --i)
           {
               for (int j=0; j<property_to_propagate->arity(); ++j)
@@ -1864,12 +1805,12 @@ namespace ufo
                 {
                     if (lexical_cast<string>(property_to_propagate->arg(j)->left())==lexical_cast<string>(custom_unprime(LHS[k],m_efac)))
                     {
-                     
+                   
                     }
 
                     if (lexical_cast<string>(property_to_propagate->arg(j)->right())==lexical_cast<string>(custom_unprime(LHS[k],m_efac)))
                     {
-                     
+                      
                     }
                 }
 
@@ -1881,8 +1822,7 @@ namespace ufo
         
 
 
-
-          
+      
        
           
       }
@@ -1916,7 +1856,6 @@ namespace ufo
           {
             coeffs.insert(var->left());
             values[var->left()].insert(val);
-          //  cout << var << " = " << val << endl;
             iters.insert(var->right());
           }
         }
@@ -1955,14 +1894,13 @@ namespace ufo
       }
     }
 
-    
+  
     void processQuery(HornRuleExt& c)
     {
-      
       if (QE2)
       {
         Expr property = c.body;
-        property_to_propagate = property->right();
+        property_to_propagate = property->right(); 
         property_to_propagate = mk<NEG>(property_to_propagate);
         number_of_layers = lexical_cast<int>(property->left()->right());
         my_if_condition = mk<EQ>(property->left()->left(),mkMPZ(number_of_layers,m_efac));
@@ -1980,7 +1918,7 @@ namespace ufo
     tribool invSyn(int b = 0)
     {
 
-    
+     
       if (b == 200 /* Change this and report runtimes */) return indeterminate;
       outs () << "\nINV SYN ROUND " << b << "\n";
       outs().flush();
@@ -1992,7 +1930,7 @@ namespace ufo
         auto & c = ruleManager.chcs[chc];
       
         
-        if (b == 0) // preprocess
+        if (b == 0) 
         {
           ExprSet bdy;
           getConj(c.body, bdy);
@@ -2000,11 +1938,10 @@ namespace ufo
           vars.insert(vars.end(), c.dstVars.begin(), c.dstVars.end());
           c.body = simpEquivClasses(vars, bdy, m_efac);
         }
-
-       
-        if (c.isFact) processFact(c); // <- changed
+      
+        if (c.isFact) processFact(c); 
         if (c.isInductive) processTrans(c);
-        if (!c.isFact && ! c.isInductive) processQuery(c);
+        if (!c.isFact && ! c.isInductive) processQuery(c); 
       }
 
       auto res = multiHoudini(ruleManager.wtoCHCs);
@@ -2023,28 +1960,12 @@ namespace ufo
 
   inline void learnInvariants5(string smt, unsigned to, int debug, bool quantifier_elimination) // GF: to clean
   {
-  
     ExprFactory m_efac;
-
     EZ3 z3(m_efac);
-
-
-    CHCs ruleManager(m_efac, z3, debug - 2);
-
-  
-   auto res = ruleManager.parse(smt, 0, 0 /*doArithm*/);
-
-
-  
-
-
-    
+    CHCs ruleManager(m_efac, z3, debug - 2);   
+    auto res = ruleManager.parse(smt, 0, 0 /*doArithm*/);
     if (!res) return;
-
-
     Xai ds(m_efac, z3, ruleManager, to, debug);
-
-
     for (auto dcl : ruleManager.decls) ds.initializeDecl(dcl->left());
 
     if (ds.invSyn())

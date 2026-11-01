@@ -72,6 +72,6 @@ int main (int argc, char ** argv)
   int to = getIntValue(OPT_TO, 1000, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
 
-  learnInvariants5(string(argv[argc-1]), to, debug);
+  learnInvariants5(string(argv[argc-1]), to, debug, false);
   return 0;
 }
