@@ -1,29 +1,4 @@
 #!/usr/bin/env python3
-"""
-Remove the weight and bias arrays from the XAI neural-network CHC benchmarks
-(bench_XAI_toy/, bench_xai_ha/) and write them in CHC-COMP format for Golem.
-
-The encoding stays the same: one predicate with the layer counter, and the
-same rules. Only the arrays go:
-  - the fact fixes their entries and the transition copies them, so they are
-    dropped from the predicate and every read (select ...) is replaced by the
-    constant the fact gives it;
-  - a read indexed by the counter is split on the values the transition guard
-    allows, e.g. with (or (= counter 0) (= counter 1)) a right-hand side
-    becomes (ite (= counter 0.0) <layer 0> <layer 1>);
-  - define-funs (max, ReLU) are inlined, the counter becomes Real if it is Int
-    (toy files) and numerals are written as reals: Golem accepts QF_LRA or
-    QF_LIA, not both.
-Anything outside this shape (a read the fact doesn't fix, arrays changed by a
-rule, Int variables other than the counter, ...) is an error, not a guess.
-
-Usage:
-  remove_arrays.py IN.smt2                         # print to stdout
-  remove_arrays.py IN.smt2 -o OUT.smt2
-  remove_arrays.py IN1.smt2 IN2.smt2 ... -o OUTDIR   # OUTDIR/<same name>
-
-Then:  golem -l QF_LRA -e spacer --print-witness --validate OUT.smt2
-"""
 
 import argparse
 import os
