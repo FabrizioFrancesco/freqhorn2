@@ -1,0 +1,4 @@
+file                                               lemmas   frozen   layers    layer_chars      max_chars
+/Users/fabrizio/Desktop/work/freqhorn2/bench_xai_ha/heart_attack_50x1_s0.smt2     5103     5100        3          33712          32494
+/Users/fabrizio/Desktop/work/freqhorn2/bench_xai_ha/heart_attack_50x2_s0.smt2     7654     7650        4        3214060        3100119
+/Users/fabrizio/Desktop/work/freqhorn2/bench_xai_ha/heart_attack_50x3_s0.smt2    10205    10200        5      308419273      297562499

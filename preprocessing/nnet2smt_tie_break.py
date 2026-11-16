@@ -11,6 +11,12 @@ multiclass_classification = not binary_classification
 
 which_class = 0
 
+# Compact padding: neurons that are padding in every layer (index >= widest real
+# layer output) always compute 0, so their transition is (= xi_prime 0) and their
+# weights/biases are not written. Equivalent to the full encoding, but much smaller
+# when the input is much wider than the hidden layers (e.g. MNIST).
+compact_padding = False
+
 def read_nnet(NNnnet):
     file_lines = []
     with open(NNnnet,"r") as g:
@@ -215,7 +221,7 @@ def to_plain(x):
     d = Decimal(x if isinstance(x, str) else str(x))
     return format(d, "f")
 
-def write_header(f,x,number_layers,W,b):
+def write_header(f,x,number_layers,W,b,real_width):
     f.write("\n")
     f.write("(rule\n")
     f.write("\t(=>\n")
@@ -225,12 +231,12 @@ def write_header(f,x,number_layers,W,b):
     f.write("\t\t\t(= counter 0)\n")
     
     for i in range(number_layers):
-        for j in range(x):
+        for j in range(real_width):
             for k in range(x):
                 f.write("\t\t\t(= (select (select w"+str(j)+" "+str(k)+") "+str(i)+") "+to_plain(W[i][j][k])+")\n")
                     
     for i in range(number_layers):
-        for j in range(x):
+        for j in range(real_width):
             f.write("\t\t\t(= (select b"+str(j)+" "+str(i)+") "+to_plain(b[i][j])+")\n")
     
     f.write("\t\t)\n")
@@ -254,7 +260,7 @@ def write_header(f,x,number_layers,W,b):
     f.write("\t)\n")
     f.write(")\n")
     
-def write_transition(f,x,number_layers):
+def write_transition(f,x,number_layers,real_width):
     f.write("\n")
     f.write("(rule\n")
     f.write("\t(=>\n")
@@ -277,6 +283,9 @@ def write_transition(f,x,number_layers):
     
     # write transition
     for i in range(x):
+        if (i>=real_width):
+            f.write("\t\t\t(= x"+str(i)+"_prime 0)\n")
+            continue
         c = "(+ "
         
         for j in range(x):
@@ -326,7 +335,7 @@ def write_transition(f,x,number_layers):
     f.write("\t)\n")
     f.write(")\n")
     
-def write_bad_states(f,x,number_layers):
+def write_bad_states(f,x,number_layers,number_outputs):
     f.write("\n")
     f.write("(rule\n")
     f.write("\t(=>\n")
@@ -348,18 +357,23 @@ def write_bad_states(f,x,number_layers):
     f.write("\t\t\t(inv counter "+c+")\n")
     
     if (binary_classification):
-        f.write("\t\t\t(not (>= x"+str(which_class)+" 0))\n")
+        # Single output x0: class 1 <-> x0 >= 0, class 0 <-> x0 < 0
+        if (which_class==1):
+            f.write("\t\t\t(not (>= x0 0))\n")
+        else:
+            f.write("\t\t\t(not (< x0 0))\n")
     else:
+        # Compare only against the real output neurons, not the zero padding
         d = ""
-        for i in range(x):
+        for i in range(number_outputs):
             if (i!=which_class):
                 if (i<which_class):
-                    if (i!=x-1):
+                    if (i!=number_outputs-1):
                         d+="(> x"+str(which_class)+" x"+str(i)+") "
                     else:
                         d+="(> x"+str(which_class)+" x"+str(i)+")"
                 else:
-                    if (i!=x-1):
+                    if (i!=number_outputs-1):
                         d+="(>= x"+str(which_class)+" x"+str(i)+") "
                     else:
                         d+="(>= x"+str(which_class)+" x"+str(i)+")"
@@ -392,11 +406,27 @@ def main():
     f = open(translated_file,"w")
 
     write_decl(f,maximum_layer_size,number_layers)
-    write_header(f,maximum_layer_size,number_layers,W,b)
-    write_transition(f,maximum_layer_size,number_layers)
-    write_bad_states(f,maximum_layer_size,number_layers)
+    real_width = maximum_layer_size
+    if (compact_padding):
+        real_width = max(NN_architecture[1:])
+
+    write_header(f,maximum_layer_size,number_layers,W,b,real_width)
+    write_transition(f,maximum_layer_size,number_layers,real_width)
+    write_bad_states(f,maximum_layer_size,number_layers,number_outputs)
     f.close()
     
     
 if __name__=="__main__":
+    # Optional: nnet2smt_tie_break.py <nnet> <out.smt2> <which_class> <comma-separated sample> [compact]
+    if (len(sys.argv)==6 and sys.argv[5]=="compact"):
+        compact_padding = True
+    if (len(sys.argv) in (5,6)):
+        my_file = sys.argv[1]
+        translated_file = sys.argv[2]
+        which_class = int(float(sys.argv[3]))
+        original_sample = sys.argv[4].split(",")
+        # Binary iff the network has a single output neuron
+        number_outputs = from_first_line(polish_file_lines(read_nnet(my_file)))[2]
+        binary_classification = (number_outputs==1)
+        multiclass_classification = not binary_classification
     main()
