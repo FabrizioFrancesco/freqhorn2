@@ -35,13 +35,13 @@ tools/deep_bench/windows/out-*.tar.gz
 .claude/
 
 # MNIST benchmarks over GitHub's 100MB file limit
-/bench_xai_mnist/mnist_50x3_s0.smt2
-/bench_xai_mnist/mnist_50x4_s0.smt2
-/bench_xai_mnist/mnist_50x5_s0.smt2
-/bench_xai_mnist/mnist_50x6_s0.smt2
-/bench_xai_mnist/mnist_50x7_s0.smt2
-/bench_xai_mnist/mnist_50x8_s0.smt2
-/bench_xai_mnist/mnist_50x9_s0.smt2
-/bench_xai_mnist/mnist_50x10_s0.smt2
-/bench_xai_mnist/mnist_50x12_s0.smt2
-/bench_xai_mnist/mnist_50x14_s0.smt2
+/bench_xai_mnist/**/mnist_50x3_s0.smt2
+/bench_xai_mnist/**/mnist_50x4_s0.smt2
+/bench_xai_mnist/**/mnist_50x5_s0.smt2
+/bench_xai_mnist/**/mnist_50x6_s0.smt2
+/bench_xai_mnist/**/mnist_50x7_s0.smt2
+/bench_xai_mnist/**/mnist_50x8_s0.smt2
+/bench_xai_mnist/**/mnist_50x9_s0.smt2
+/bench_xai_mnist/**/mnist_50x10_s0.smt2
+/bench_xai_mnist/**/mnist_50x12_s0.smt2
+/bench_xai_mnist/**/mnist_50x14_s0.smt2

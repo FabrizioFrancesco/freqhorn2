@@ -1,0 +1,77 @@
+(declare-var counter Real)
+(declare-var counter_prime Real)
+(declare-var x0 Real)
+(declare-var x1 Real)
+(declare-var x0_prime Real)
+(declare-var x1_prime Real)
+(declare-var w0 (Array Real (Array Real Real)))
+(declare-var w1 (Array Real (Array Real Real)))
+(declare-var w0_prime (Array Real (Array Real Real)))
+(declare-var w1_prime (Array Real (Array Real Real)))
+(declare-var b0 (Array Real Real))
+(declare-var b1 (Array Real Real))
+(declare-var b0_prime (Array Real Real))
+(declare-var b1_prime (Array Real Real))
+(define-fun max ((a Real) (b Real)) Real (ite (> a b) a b))
+(define-fun ReLU ((a Real) (b Real) (c Real)) Real (ite (= c 2) a (max a b)))
+(declare-rel inv ((Real)(Real) (Real) (Array Real (Array Real Real)) (Array Real (Array Real Real)) (Array Real Real) (Array Real Real)))
+(declare-rel fail ())
+
+(rule
+	(=>
+		(and
+			(= x0 0.8842)
+			(= x1 0.2105)
+			(= counter 0)
+			(= (select (select w0 0) 0) -0.0735)
+			(= (select (select w0 1) 0) 0.297)
+			(= (select (select w1 0) 0) -0.1075)
+			(= (select (select w1 1) 0) 0.1921)
+			(= (select (select w0 0) 1) -0.5701)
+			(= (select (select w0 1) 1) -0.8112)
+			(= (select (select w1 0) 1) -0.9842)
+			(= (select (select w1 1) 1) 1.5908)
+			(= (select (select w0 0) 2) 0.2267)
+			(= (select (select w0 1) 2) -0.1784)
+			(= (select (select w1 0) 2) 0)
+			(= (select (select w1 1) 2) 0)
+			(= (select b0 0) 0.0618)
+			(= (select b1 0) 0.0433)
+			(= (select b0 1) 0.073)
+			(= (select b1 1) -0.0236)
+			(= (select b0 2) -0.0004)
+			(= (select b1 2) 0)
+		)
+		(inv counter x0 x1 w0 w1 b0 b1)
+	)
+)
+
+(rule
+	(=>
+		(and
+			(inv counter x0 x1 w0 w1 b0 b1)
+			(= x0_prime (ReLU (+ (* (select (select w0 0) counter) x0) (* (select (select w0 1) counter) x1) (select b0 counter)) 0 counter))
+			(= x1_prime (ReLU (+ (* (select (select w1 0) counter) x0) (* (select (select w1 1) counter) x1) (select b1 counter)) 0 counter))
+			(= w0_prime w0)
+			(= w1_prime w1)
+			(= b0_prime b0)
+			(= b1_prime b1)
+			(= counter_prime (+ counter 1))
+			(or (= counter 0) (= counter 1) (= counter 2))
+		)
+		(inv counter_prime x0_prime x1_prime w0_prime w1_prime b0_prime b1_prime)
+	)
+)
+
+(rule
+	(=>
+		(and
+			(inv counter x0 x1 w0 w1 b0 b1)
+			(not (>= x0 0))
+			(>= counter 3)
+		)
+		fail
+	)
+)
+
+(query fail)
