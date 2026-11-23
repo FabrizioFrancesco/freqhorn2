@@ -122,9 +122,16 @@ namespace ufo
 
         ExprMap transitionMap;
         for (auto const& [key, values] : transitions)
+        {
+          prof::Timer timer("preimage: substituteCoefficients");
           transitionMap[key] = substituteCoefficients(replaceAll(*values.begin(), counterMap));
-        res = replaceAll(res, transitionMap);
+        }
+        {
+          prof::Timer timer("preimage: replaceAll transitions");
+          res = replaceAll(res, transitionMap);
+        }
 
+        prof::Timer timer("preimage: fold");
         ExprMap memo;
         return fold(res, memo);
       }
@@ -152,19 +159,9 @@ namespace ufo
         {
           if (lm == NULL || !isOpX<EQ>(lm)) continue;
 
-          Expr var = NULL, val = NULL;
-          if (isNumericConst(lm->left()))
-          {
-            val = lm->left();
-            var = lm->right();
-          }
-          else if (isNumericConst(lm->right()))
-          {
-            val = lm->right();
-            var = lm->left();
-          }
-
-          if (val == NULL || var == NULL || !isOpX<SELECT>(var)) continue;
+          Expr var = lm->left(), val = lm->right();
+          if (isNumericConst(var)) std::swap(var, val);
+          if (!isNumericConst(val) || !isOpX<SELECT>(var)) continue;
 
           if (isOpX<SELECT>(var->left()))
           {
@@ -240,15 +237,15 @@ namespace ufo
           Expr val = lookupCoefficient(s);
           if (val != NULL) replMap[s] = val;
         }
-        // NEEDED INFO:
-        // print function identifier substituteCoefficients
-        // print replMap size (how many substitutions)
-        // print DAG size of Expr e (formula size)
-        // .......................................
-        // Then we should decide what to do next!
-        // MORE DATA needed
-        // redundancy should not be the problem... DAG 
-        return replaceAll(e, replMap);
+
+        Expr res = replaceAll(e, replMap);
+        if (printLog >= 2)
+          outs() << "substituteCoefficients: selects = " << selects.size()
+                 << ", substitutions = " << replMap.size()
+                 << ", dag size = " << dagSize(e)
+                 << " -> " << dagSize(res) << "\n";
+
+        return res;
       }
 
       static bool numericValue(Expr e, mpq_class& v)
@@ -270,36 +267,37 @@ namespace ufo
         auto it = memo.find(e);
         if (it != memo.end()) return it->second;
 
-        Expr res = e;
-        mpq_class v;
-        if (e->arity() == 0 || isOpX<FAPP>(e) || isOpX<SELECT>(e))
-          res = e;
-        else if (isOpX<ITE>(e))
-          res = foldIte(e, memo);
-        else if (isOpX<PLUS>(e))
-          res = foldPlus(e, memo);
-        else if (isOpX<MULT>(e))
-          res = foldMult(e, memo);
-        else if (isOpX<UN_MINUS>(e))
-        {
-          Expr s = fold(e->left(), memo);
-          res = numericValue(s, v) ? mkNum(-v) : mk<UN_MINUS>(s);
-        }
-        else if (isOpX<AND>(e) || isOpX<OR>(e))
-          res = foldJunction(e, memo);
-        else if (isOpX<NEG>(e))
-        {
-          Expr s = fold(e->left(), memo);
-          if (isOpX<TRUE>(s)) res = mk<FALSE>(m_efac);
-          else if (isOpX<FALSE>(s)) res = mk<TRUE>(m_efac);
-          else if (isOpX<NEG>(s)) res = s->left();
-          else res = mk<NEG>(s);
-        }
-        else
-          res = foldGeneric(e, memo);
-
+        Expr res = foldNode(e, memo);
         memo[e] = res;
         return res;
+      }
+
+      Expr foldNode(Expr e, ExprMap& memo)
+      {
+        if (e->arity() == 0 || isOpX<FAPP>(e) || isOpX<SELECT>(e)) return e;
+        if (isOpX<ITE>(e))                 return foldIte(e, memo);
+        if (isOpX<PLUS>(e))                return foldPlus(e, memo);
+        if (isOpX<MULT>(e))                return foldMult(e, memo);
+        if (isOpX<UN_MINUS>(e))            return foldUnaryMinus(e, memo);
+        if (isOpX<AND>(e) || isOpX<OR>(e)) return foldJunction(e, memo);
+        if (isOpX<NEG>(e))                 return foldNeg(e, memo);
+        return foldGeneric(e, memo);
+      }
+
+      Expr foldUnaryMinus(Expr e, ExprMap& memo)
+      {
+        mpq_class v;
+        Expr s = fold(e->left(), memo);
+        return numericValue(s, v) ? mkNum(-v) : mk<UN_MINUS>(s);
+      }
+
+      Expr foldNeg(Expr e, ExprMap& memo)
+      {
+        Expr s = fold(e->left(), memo);
+        if (isOpX<TRUE>(s)) return mk<FALSE>(m_efac);
+        if (isOpX<FALSE>(s)) return mk<TRUE>(m_efac);
+        if (isOpX<NEG>(s)) return s->left();
+        return mk<NEG>(s);
       }
 
       Expr foldIte(Expr e, ExprMap& memo)
@@ -360,6 +358,25 @@ namespace ufo
         return isAnd ? conjoin(args, m_efac) : disjoin(args, m_efac);
       }
 
+      static bool isComparison(Expr e)
+      {
+        return isOpX<EQ>(e) || isOpX<NEQ>(e) || isOpX<GEQ>(e) ||
+               isOpX<LEQ>(e) || isOpX<GT>(e) || isOpX<LT>(e);
+      }
+
+      static bool compare(Expr e, const mpq_class& v, const mpq_class& w)
+      {
+        if (isOpX<EQ>(e))  return v == w;
+        if (isOpX<NEQ>(e)) return v != w;
+        if (isOpX<GEQ>(e)) return v >= w;
+        if (isOpX<LEQ>(e)) return v <= w;
+        if (isOpX<GT>(e))  return v > w;
+        if (isOpX<LT>(e))  return v < w;
+        
+        outs() << "Wrong expression detected" << endl;
+        return v < w;
+      }
+
       Expr foldGeneric(Expr e, ExprMap& memo)
       {
         mpq_class v, w;
@@ -368,24 +385,18 @@ namespace ufo
           args.push_back(fold(*a, memo));
 
         if (args.size() == 2 && numericValue(args[0], v) && numericValue(args[1], w) &&
-            (isOpX<EQ>(e) || isOpX<NEQ>(e) || isOpX<GEQ>(e) ||
-             isOpX<LEQ>(e) || isOpX<GT>(e) || isOpX<LT>(e)))
-        {
-          bool b = isOpX<EQ>(e) ? v == w : isOpX<NEQ>(e) ? v != w :
-                   isOpX<GEQ>(e) ? v >= w : isOpX<LEQ>(e) ? v <= w :
-                   isOpX<GT>(e) ? v > w : v < w;
-          return b ? mk<TRUE>(m_efac) : mk<FALSE>(m_efac);
-        }
+            isComparison(e))
+          return compare(e, v, w) ? mk<TRUE>(m_efac) : mk<FALSE>(m_efac);
 
         if (isOpX<MINUS>(e) && numericValue(args[0], v))
         {
-          bool allNum = true;
-          for (int i = 1; i < args.size() && allNum; i++)
+          bool allNumeric = true;
+          for (int i = 1; i < args.size() && allNumeric; i++)
           {
             if (numericValue(args[i], w)) v -= w;
-            else allNum = false;
+            else allNumeric = false;
           }
-          if (allNum) return mkNum(v);
+          if (allNumeric) return mkNum(v);
         }
 
         return m_efac.mkNary(e->op(), args.begin(), args.end());

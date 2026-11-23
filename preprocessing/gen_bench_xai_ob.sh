@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generates one .smt2 per (network, sample) pair into ../bench_xai_ob:
-#   obesity_50x<k>_s<i>.smt2  for every obesity/*.nnet and every CSV row i.
+#   class<c>/obesity_50x<k>_s<i>.smt2  for every obesity/*.nnet and every CSV row i.
 # The last CSV column is the class and is passed as which_class;
 # the features are zero-padded up to the network's maximum layer size.
 set -euo pipefail
@@ -27,4 +27,7 @@ for nnet in obesity/*.nnet; do
     echo "$name done"
 done
 
-echo "Generated $(ls "$OUT"/*.smt2 | wc -l | tr -d ' ') files in $OUT"
+# move every file into $OUT/class<c>/, by the class its query encodes
+python3 sort.py "$OUT"
+
+echo "Generated $(find "$OUT" -name '*.smt2' | wc -l | tr -d ' ') files in $OUT"

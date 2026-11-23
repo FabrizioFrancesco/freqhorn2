@@ -11,6 +11,10 @@ Examples (from the repository root):
   # re-draw the plots from an existing CSV without running anything
   python3 experiments/run_xai_experiments.py --plot-only
 
+A folder is searched with its subfolders, so the class<c>/ folders written by
+preprocessing/sort.py are included, and c is recorded in the CSV column "class". A class
+folder can also be given on its own (e.g. bench_xai_ha/class0): its set is still bench_xai_ha.
+
 Instances already present in the CSV are skipped (use --rerun to run them again),
 so an interrupted run can be resumed with the same command.
 
@@ -41,7 +45,10 @@ DEFAULT_OUT = os.path.join(ROOT, "experiments", "results")
 # heart_attack_50x3_s17.smt2 -> network heart_attack_50x3, width 50, layers 3, sample 17
 NAME = re.compile(r"^(?P<network>.*?(?P<width>\d+)x(?P<layers>\d+))(?:_s(?P<sample>\d+))?\.smt2$")
 
-FIELDS = ["set", "file", "network", "width", "layers", "sample",
+# bench_xai_ha/class1/heart_attack_50x3_s17.smt2 -> class 1
+CLASS_DIR = re.compile(r"^class(?P<cls>\d+)$")
+
+FIELDS = ["set", "file", "network", "width", "layers", "sample", "class",
           "status", "time_s", "returncode"]
 COMPLETED = ("sat", "done")
 
@@ -58,13 +65,20 @@ def parse_name(fname):
 def collect_instances(dirs, max_samples):
     instances = []
     for d in dirs:
-        bench_set = os.path.basename(os.path.normpath(d))
-        files = [f for f in os.listdir(d) if f.endswith(".smt2")]
-        for f in files:
-            info = parse_name(f)
-            if max_samples is not None and info["sample"] != "" and info["sample"] >= max_samples:
-                continue
-            instances.append(dict(info, set=bench_set, file=f, path=os.path.join(d, f)))
+        d = os.path.normpath(d)
+        bench_set = os.path.basename(d)
+        if CLASS_DIR.match(bench_set):
+            bench_set = os.path.basename(os.path.dirname(os.path.abspath(d)))
+        for sub, _, files in os.walk(d):
+            m = CLASS_DIR.match(os.path.basename(sub))
+            for f in files:
+                if not f.endswith(".smt2"):
+                    continue
+                info = parse_name(f)
+                if max_samples is not None and info["sample"] != "" and info["sample"] >= max_samples:
+                    continue
+                instances.append(dict(info, set=bench_set, file=f, path=os.path.join(sub, f),
+                                      **{"class": int(m.group("cls")) if m else ""}))
     instances.sort(key=lambda r: (r["set"], str(r["network"]), r["layers"] or 0, r["sample"] or 0))
     return instances
 
@@ -108,6 +122,8 @@ def read_csv(path):
 def run_experiments(args, csv_path, log_dir):
     instances = collect_instances(args.dirs, args.max_samples)
     previous = read_csv(csv_path)
+    if previous and list(previous[0].keys()) != FIELDS:
+        sys.exit("%s has different columns than %s: use another --csv" % (csv_path, ", ".join(FIELDS)))
     if args.rerun:
         todo_keys = {(i["set"], i["file"]) for i in instances}
         previous = [r for r in previous if (r["set"], r["file"]) not in todo_keys]

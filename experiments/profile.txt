@@ -1,0 +1,114 @@
+######## heart_attack_50x1_s0.smt2
+== profile (wall time 20.087s)
+timer                                                     calls      total s       avg ms   % wall
+invSyn: simpEquivClasses (trans)                              1        9.986     9985.837    49.7%
+simpEquivClasses: rewrite (filter + replaceAll)            1329        8.811        6.630    43.9%
+simpEquivClasses: find hard var (contains)                 2032        7.667        3.773    38.2%
+invSyn: simpEquivClasses (fact)                               1        6.882     6882.054    34.3%
+invSyn: processfact                                           1        2.173     2172.697    10.8%
+addToCandidates                                              53        1.093       20.631     5.4%
+addToCandidates: implies (SMT)                               53        1.082       20.407     5.4%
+learnInvariants5: parse                                       1        0.701      700.534     3.5%
+processFact: isFrozenConstSelect                           5151        0.464        0.090     2.3%
+simpEquivClasses: build classes                               6        0.399       66.515     2.0%
+invSyn: simpEquivClasses (query)                              1        0.335      334.613     1.7%
+simpEquivClasses: simplifyBool                                6        0.319       53.232     1.6%
+processFact: BackwardRewriter constructor                     1        0.261      260.817     1.3%
+preimage: substituteCoefficients                            100        0.231        2.313     1.2%
+processFact: preimage, layer 0                                1        0.127      126.774     0.6%
+processFact: preimage, layer 1                                1        0.118      117.636     0.6%
+processFact: addLemma (frozen)                             5100        0.008        0.002     0.0%
+preimage: fold                                                2        0.008        3.783     0.0%
+preimage: replaceAll transitions                              2        0.004        1.977     0.0%
+learnInvariants5: initialize                                  1        0.002        2.442     0.0%
+invSyn: processtrans                                          1        0.000        0.056     0.0%
+processFact: addLemma (layer)                                 3        0.000        0.003     0.0%
+invSyn: processquery                                          1        0.000        0.002     0.0%
+counter                                                   value
+preimage: dag size of result, layer 0                      1543
+preimage: dag size of result, layer 1                       241
+simpEquivClasses: classes (sum over rounds)                2032
+simpEquivClasses: conjuncts (sum over rounds)             11214
+simpEquivClasses: contains calls                         460634
+simpEquivClasses: hard vars (sum over rounds)              1208
+simpEquivClasses: replaceAll calls                          604
+simpEquivClasses: rounds                                      6
+
+######## heart_attack_50x2_s0.smt2
+== profile (wall time 38.981s)
+timer                                                     calls      total s       avg ms   % wall
+invSyn: simpEquivClasses (fact)                               1       19.693    19692.901    50.5%
+simpEquivClasses: find hard var (contains)                 6642       15.553        2.342    39.9%
+simpEquivClasses: rewrite (filter + replaceAll)            3634       10.540        2.900    27.0%
+invSyn: simpEquivClasses (trans)                              1       10.041    10041.290    25.8%
+invSyn: processfact                                           1        8.057     8057.065    20.7%
+addToCandidates                                              53        6.211      117.192    15.9%
+addToCandidates: implies (SMT)                               53        6.158      116.197    15.8%
+simpEquivClasses: build classes                               6        3.535      589.132     9.1%
+learnInvariants5: parse                                       1        0.855      854.561     2.2%
+processFact: isFrozenConstSelect                           7701        0.709        0.092     1.8%
+simpEquivClasses: simplifyBool                                6        0.432       72.005     1.1%
+processFact: BackwardRewriter constructor                     1        0.429      429.070     1.1%
+preimage: substituteCoefficients                            150        0.379        2.529     1.0%
+invSyn: simpEquivClasses (query)                              1        0.329      329.379     0.8%
+processFact: preimage, layer 0                                1        0.247      247.458     0.6%
+processFact: preimage, layer 1                                1        0.154      154.211     0.4%
+processFact: preimage, layer 2                                1        0.127      127.123     0.3%
+preimage: replaceAll transitions                              3        0.053       17.803     0.1%
+preimage: fold                                                3        0.051       17.157     0.1%
+processFact: addLemma (frozen)                             7650        0.012        0.002     0.0%
+learnInvariants5: initialize                                  1        0.002        2.126     0.0%
+invSyn: processtrans                                          1        0.000        0.016     0.0%
+processFact: addLemma (layer)                                 4        0.000        0.004     0.0%
+invSyn: processquery                                          1        0.000        0.002     0.0%
+counter                                                   value
+preimage: dag size of result, layer 0                      6246
+preimage: dag size of result, layer 1                      4911
+preimage: dag size of result, layer 2                       246
+simpEquivClasses: classes (sum over rounds)                6642
+simpEquivClasses: conjuncts (sum over rounds)             16314
+simpEquivClasses: contains calls                        1518924
+simpEquivClasses: hard vars (sum over rounds)              1208
+simpEquivClasses: replaceAll calls                          604
+simpEquivClasses: rounds                                      6
+
+######## heart_attack_50x3_s0.smt2
+== profile (wall time 50.814s)
+timer                                                     calls      total s       avg ms   % wall
+invSyn: simpEquivClasses (fact)                               1       35.101    35100.790    69.1%
+simpEquivClasses: find hard var (contains)                11364       25.758        2.267    50.7%
+simpEquivClasses: rewrite (filter + replaceAll)            5995       13.392        2.234    26.4%
+invSyn: simpEquivClasses (trans)                              1       10.869    10869.478    21.4%
+simpEquivClasses: build classes                               6        6.526     1087.595    12.8%
+invSyn: processfact                                           1        3.353     3353.062     6.6%
+learnInvariants5: parse                                       1        1.131     1130.623     2.2%
+processFact: isFrozenConstSelect                          10251        1.117        0.109     2.2%
+simpEquivClasses: simplifyBool                                6        0.643      107.222     1.3%
+processFact: BackwardRewriter constructor                     1        0.627      627.310     1.2%
+preimage: substituteCoefficients                            200        0.552        2.761     1.1%
+addToCandidates                                              53        0.368        6.951     0.7%
+addToCandidates: implies (SMT)                               53        0.361        6.808     0.7%
+invSyn: simpEquivClasses (query)                              1        0.354      353.568     0.7%
+processFact: preimage, layer 0                                1        0.347      347.216     0.7%
+processFact: preimage, layer 1                                1        0.287      286.974     0.6%
+processFact: preimage, layer 2                                1        0.173      173.063     0.3%
+processFact: preimage, layer 3                                1        0.142      141.582     0.3%
+preimage: replaceAll transitions                              4        0.139       34.872     0.3%
+preimage: fold                                                4        0.131       32.792     0.3%
+processFact: addLemma (frozen)                            10200        0.019        0.002     0.0%
+learnInvariants5: initialize                                  1        0.002        2.195     0.0%
+processFact: addLemma (layer)                                 5        0.000        0.003     0.0%
+invSyn: processtrans                                          1        0.000        0.008     0.0%
+invSyn: processquery                                          1        0.000        0.002     0.0%
+counter                                                   value
+preimage: dag size of result, layer 0                     11065
+preimage: dag size of result, layer 1                      9733
+preimage: dag size of result, layer 2                      4961
+preimage: dag size of result, layer 3                       245
+simpEquivClasses: classes (sum over rounds)               11364
+simpEquivClasses: conjuncts (sum over rounds)             21414
+simpEquivClasses: contains calls                        2590762
+simpEquivClasses: hard vars (sum over rounds)              1208
+simpEquivClasses: replaceAll calls                          604
+simpEquivClasses: rounds                                      6
+

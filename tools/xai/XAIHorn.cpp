@@ -55,6 +55,7 @@ int main (int argc, char ** argv)
   const char *OPT_HELP = "--help";
   const char *OPT_TO = "--to";
   const char *OPT_DEBUG = "--debug";
+  const char *OPT_PROFILE = "--profile";
 
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
     outs () <<
@@ -64,13 +65,15 @@ int main (int argc, char ** argv)
         " freqhorn [options] <file.smt2>  discover invariants for a system of constrained Horn clauses\n\n" <<
         "Options:\n" <<
         " " << OPT_TO << "                            timeout for each Z3 run in ms (default: 1000)\n" <<
-        " " << OPT_DEBUG << " <LVL>                   print debugging information during run (default level: 0)\n";
+        " " << OPT_DEBUG << " <LVL>                   print debugging information during run (default level: 0)\n" <<
+        " " << OPT_PROFILE << "                       print call counts and timings to stderr on exit\n";
 
     return 0;
   }
 
   int to = getIntValue(OPT_TO, 1000, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
+  prof::init(getBoolValue(OPT_PROFILE, false, argc, argv));
 
   learnInvariants5(string(argv[argc-1]), to, debug, false);
   return 0;

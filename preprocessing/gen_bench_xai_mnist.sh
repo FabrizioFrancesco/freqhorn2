@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generates one .smt2 per (network, sample) pair into ../bench_xai_mnist
 # (or ../bench_xai_mnist_compact_padding with COMPACT=1):
-#   mnist_50x<k>_s<i>.smt2  for every mnist/*.nnet and every sample index i in SAMPLES.
+#   class<c>/mnist_50x<k>_s<i>.smt2  for every mnist/*.nnet and every sample index i in SAMPLES.
 # MNIST files are large (~35 MB per layer, since layers are padded to 784x784),
 # so only the selected samples are generated, e.g.: SAMPLES="0 3 7" ./gen_bench_xai_mnist.sh
 # COMPACT=1 uses the converter's compact padding encoding (same semantics, much smaller files).
@@ -38,4 +38,7 @@ for nnet in mnist/*.nnet; do
     echo "$name done"
 done
 
-echo "Generated $(ls "$OUT"/*.smt2 | wc -l | tr -d ' ') files in $OUT"
+# move every file into $OUT/class<c>/, by the class its query encodes
+python3 sort.py "$OUT"
+
+echo "Generated $(find "$OUT" -name '*.smt2' | wc -l | tr -d ' ') files in $OUT"

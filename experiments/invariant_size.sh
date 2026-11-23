@@ -35,7 +35,8 @@ printf "%-48s %8s %8s %8s %14s %14s\n" file lemmas frozen layers layer_chars max
 
 for arg in "$@"; do
   if [ -d "$arg" ]; then
-    for f in "$arg"/*.smt2; do
+    # subfolders included, e.g. the class<c>/ folders written by preprocessing/sort.py
+    for f in $(find "$arg" -name "*.smt2" | sort); do
       measure "$f"
     done
   else

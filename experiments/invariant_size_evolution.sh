@@ -8,7 +8,7 @@ ROOT="$(cd "$DIR/.." && pwd)"
 BENCH="$ROOT/bench_xai_ha"
 OUT="$DIR/size_evolution.txt"
 
-FILES=$(ls "$BENCH"/*_s0.smt2 | awk -F'x' '{ split($NF, a, "_"); print a[1], $0 }' | sort -n | cut -d' ' -f2-)
+FILES=$(find "$BENCH" -name "*_s0.smt2" | awk -F'x' '{ split($NF, a, "_"); print a[1], $0 }' | sort -n | cut -d' ' -f2-)
 
 if [ -z "$FILES" ]; then
   echo "no sample-0 benchmarks found in $BENCH" >&2

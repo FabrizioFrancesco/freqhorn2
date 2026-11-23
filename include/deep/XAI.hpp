@@ -30,6 +30,7 @@ namespace ufo
 
     void addToCandidates(int ind, Expr e, int debugMarker)
     {
+      prof::Timer timer("addToCandidates");
       Expr rel = decls[ind];
       if (!hasOnlyVars(e, ruleManager.invVars[rel])) return;
 
@@ -47,7 +48,12 @@ namespace ufo
       }
 
       Expr lms = conjoin(sfs[ind].back().learnedExprs, m_efac);
-      if (u.implies(lms, e)) return;
+      tribool implied;
+      {
+        prof::Timer timer("addToCandidates: implies (SMT)");
+        implied = u.implies(lms, e);
+      }
+      if (implied) return;
 
       candidates[ind].push_back(e);
 
@@ -71,16 +77,26 @@ namespace ufo
       for (auto f : fct)
       {
         if (!isOpX<EQ>(f)) continue;
-        if (SKIP_CHECKS && BackwardRewriter::isFrozenConstSelect(ruleManager, c.dstRelation, f))
+        bool frozen;
+        {
+          prof::Timer timer("processFact: isFrozenConstSelect");
+          frozen = SKIP_CHECKS && BackwardRewriter::isFrozenConstSelect(ruleManager, c.dstRelation, f);
+        }
+        if (frozen)
+        {
+          prof::Timer timer("processFact: addLemma (frozen)");
           addLemma(ind, sfs[ind].back(), f);
+        }
         else
           addToCandidates(ind, f, 48);
       }
 
       srand(clock());
 
+      unique_ptr<prof::Timer> ctorTimer(new prof::Timer("processFact: BackwardRewriter constructor"));
       BackwardRewriter rewriter(m_efac, ruleManager, c,
         origTransBody ? origTransBody : ruleManager.chcs[1].body, printLog);
+      ctorTimer.reset();
       ExprVector& y = ruleManager.invVars[c.dstRelation];
 
       number_of_layers = rewriter.numberOfLayers();
@@ -94,14 +110,21 @@ namespace ufo
         Expr lemma = mk<OR>(mk<NEG>(mk<EQ>(y[0], mkMPZ(i, m_efac))), property);
 
         if (SKIP_CHECKS)
+        {
+          prof::Timer timer("processFact: addLemma (layer)");
           addLemma(ind, sfs[ind].back(), lemma);
+        }
         else
           addToCandidates(ind, lemma, 1);
 
         if (i == 0 && SKIP_CHECKS)
           exit(0);
 
-        property = rewriter.preimage(property, i - 1);
+        {
+          prof::Timer timer("processFact: preimage, layer " + to_string(i - 1));
+          property = rewriter.preimage(property, i - 1);
+        }
+        prof::count("preimage: dag size of result, layer " + to_string(i - 1), dagSize(property));
       }
     }
 
@@ -305,8 +328,10 @@ namespace ufo
         auto & c = ruleManager.chcs[chc];
       
         
+        string kind = c.isFact ? "fact" : c.isInductive ? "trans" : "query";
         if (b == 0) 
         {
+          prof::Timer timer("invSyn: simpEquivClasses (" + kind + ")");
           ExprSet bdy;
           getConj(c.body, bdy);
           ExprVector vars = c.srcVars;
@@ -314,19 +339,34 @@ namespace ufo
           c.body = simpEquivClasses(vars, bdy, m_efac);
         }
       
+        prof::Timer timer("invSyn: process" + kind);
         if (c.isFact) processFact(c); 
         if (c.isInductive) processTrans(c);
         if (!c.isFact && ! c.isInductive) processQuery(c); 
       }
 
       for (auto & c : ruleManager.chcs)
-        if (c.isInductive) splitTransByLayer(c);
+        if (c.isInductive)
+        {
+          prof::Timer timer("invSyn: splitTransByLayer");
+          splitTransByLayer(c);
+        }
 
-      auto res = multiHoudini(ruleManager.wtoCHCs);
+      bool res;
+      {
+        prof::Timer timer("invSyn: multiHoudini");
+        res = multiHoudini(ruleManager.wtoCHCs);
+      }
       if (res) assignPrioritiesForLearned();
+      bool allChecked = false;
       if (res)
       {
-        if (checkAllLemmas())
+        prof::Timer timer("invSyn: checkAllLemmas");
+        allChecked = checkAllLemmas();
+      }
+      if (res)
+      {
+        if (allChecked)
         {
          
           return true;
@@ -341,10 +381,13 @@ namespace ufo
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3, debug - 2);   
+    unique_ptr<prof::Timer> timer(new prof::Timer("learnInvariants5: parse"));
     auto res = ruleManager.parse(smt, 0, 0 /*doArithm*/);
     if (!res) return;
+    timer.reset(new prof::Timer("learnInvariants5: initialize"));
     Xai ds(m_efac, z3, ruleManager, to, debug);
     for (auto dcl : ruleManager.decls) ds.initializeDecl(dcl->left());
+    timer.reset();
 
     if (ds.invSyn())
     {

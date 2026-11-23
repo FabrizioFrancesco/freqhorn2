@@ -3,6 +3,7 @@
 #include <assert.h>
 
 #include "ufo/Smt/EZ3.hh"
+#include "ufo/Profiler.hpp"
 
 using namespace std;
 using namespace expr::op::bind;
@@ -1644,6 +1645,11 @@ namespace ufo
   // simplification based on equivalence classes
   template<typename Range> static Expr simpEquivClasses(Range& hardVars, ExprSet& cnjs, ExprFactory& efac)
   {
+    prof::count("simpEquivClasses: rounds");
+    prof::count("simpEquivClasses: conjuncts (sum over rounds)", cnjs.size());
+    prof::count("simpEquivClasses: hard vars (sum over rounds)", hardVars.size());
+    unique_ptr<prof::Timer> phase(new prof::Timer("simpEquivClasses: build classes"));
+
     set<ExprVector*> equivs;
     Expr res = conjoin(cnjs, efac);
 
@@ -1671,22 +1677,30 @@ namespace ufo
       }
     }
 
+    prof::count("simpEquivClasses: classes (sum over rounds)", equivs.size());
+
     // do rewriting
     bool toRepeat = false;
     ExprSet removed;
+    size_t containsCalls = 0, replaceAllCalls = 0;
     for (auto & eq : equivs)
     {
+      phase.reset(new prof::Timer("simpEquivClasses: find hard var (contains)"));
       Expr hardVar = NULL;
       for (auto & a : hardVars)
       {
         for (auto it = eq->begin(); it != eq->end(); ++it)
+        {
+          containsCalls++;
           if (contains(*it, a))          // for the case of selects
             { hardVar = *it; break; }
+        }
         if (hardVar != NULL) break;
       }
 
       if (hardVar == NULL) continue;
 
+      phase.reset(new prof::Timer("simpEquivClasses: rewrite (filter + replaceAll)"));
       for (auto it = eq->begin(); it != eq->end(); ++it)
       {
         ExprVector av;
@@ -1696,12 +1710,17 @@ namespace ufo
         {
           removed.insert(*it);
           res = replaceAll(res, *it, hardVar);
+          replaceAllCalls++;
           toRepeat = true;
         }
       }
       free(eq);
     }
+    prof::count("simpEquivClasses: contains calls", containsCalls);
+    prof::count("simpEquivClasses: replaceAll calls", replaceAllCalls);
+    phase.reset(new prof::Timer("simpEquivClasses: simplifyBool"));
     res = simplifyBool(res);
+    phase.reset();
     if (toRepeat)
     {
       getConj(res, cnjs);
